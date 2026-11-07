@@ -17,7 +17,7 @@ from typing import Callable, Dict, List, Optional
 from .. import http
 from ..a3m import A3MError, parse_a3m
 from ..seqkey import canonical_sequence
-from .colabfold import RemoteError, RemoteResult
+from .colabfold import JobFailed, RemoteError, RemoteResult
 
 __all__ = ["NvidiaClient", "DEFAULT_URL"]
 
@@ -116,7 +116,7 @@ class NvidiaClient:
         try:
             rows = parse_a3m(a3m, seq, what="nvidia a3m")
         except A3MError as e:
-            raise RemoteError(f"NVIDIA MSA search result failed validation: {e}") from None
+            raise JobFailed(f"NVIDIA MSA search result failed validation: {e}") from None
         return RemoteResult(
             rows=rows,
             provenance={

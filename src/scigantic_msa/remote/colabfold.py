@@ -38,7 +38,7 @@ from .. import http
 from ..a3m import A3MError, Row, parse_a3m
 from ..seqkey import canonical_sequence
 
-__all__ = ["ColabFoldClient", "RemoteError", "RateLimited", "RemoteResult", "ticket_id", "DEFAULT_HOST"]
+__all__ = ["ColabFoldClient", "RemoteError", "RateLimited", "JobFailed", "RemoteResult", "ticket_id", "DEFAULT_HOST"]
 
 DEFAULT_HOST = "https://api.colabfold.com"
 ENV_A3M = "bfd.mgnify30.metaeuk30.smag30.a3m"
@@ -55,6 +55,11 @@ class RemoteError(Exception):
 
 class RateLimited(RemoteError):
     pass
+
+
+class JobFailed(RemoteError):
+    """The server could not produce a usable result for this one sequence.
+    Other sequences may still work, so a batch can go on."""
 
 
 @dataclass
@@ -208,7 +213,7 @@ class ColabFoldClient:
             if s == "COMPLETE":
                 break
             if s == "ERROR":
-                raise RemoteError(f"{self.server_name} reported an error for job {tid}")
+                raise JobFailed(f"{self.server_name} reported an error for job {tid}")
             if s == "RATELIMIT":
                 self._wait(self._ratelimit_delay(rate_limited, st.get("_retry_after")), end)
                 rate_limited += 1
@@ -274,7 +279,7 @@ class ColabFoldClient:
         tokens = set(self.mode.split("-"))
         uniref = read("uniref.a3m")
         if not uniref:
-            raise RemoteError(f"result for job {tid} has no uniref.a3m")
+            raise JobFailed(f"result for job {tid} has no uniref.a3m")
         n_env = 0
         try:
             rows = parse_a3m(uniref, seq, what="uniref.a3m")
@@ -282,14 +287,14 @@ class ColabFoldClient:
             if "env" in tokens:
                 env = read(ENV_A3M)
                 if not env:
-                    raise RemoteError(f"result for job {tid} has no {ENV_A3M}")
+                    raise JobFailed(f"result for job {tid} has no {ENV_A3M}")
                 env_rows = parse_a3m(env, seq, what=ENV_A3M)
                 for r in env_rows[1:]:
                     r.db = "env" if not r.header.startswith("UniRef") else r.db
                 rows = rows + env_rows[1:]
                 n_env = len(env_rows) - 1
         except A3MError as e:
-            raise RemoteError(f"result for job {tid} failed validation: {e}") from None
+            raise JobFailed(f"result for job {tid} failed validation: {e}") from None
         taxmap: Dict[str, str] = {}
         tax = read("uniref_tax.tsv")
         if tax:

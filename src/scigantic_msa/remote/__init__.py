@@ -6,11 +6,11 @@ import sys
 import threading
 from typing import Any, Optional, Set
 
-from .colabfold import DEFAULT_HOST, ColabFoldClient, RateLimited, RemoteError, RemoteResult
+from .colabfold import DEFAULT_HOST, ColabFoldClient, JobFailed, RateLimited, RemoteError, RemoteResult
 from .nvidia import NvidiaClient
 
 __all__ = [
-    "ColabFoldClient", "NvidiaClient", "RemoteError", "RateLimited", "RemoteResult",
+    "ColabFoldClient", "NvidiaClient", "RemoteError", "RateLimited", "JobFailed", "RemoteResult",
     "make_backend", "announce", "remote_disabled", "BACKENDS",
 ]
 
