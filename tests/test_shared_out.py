@@ -138,6 +138,7 @@ def test_unpaired_files_are_still_shared(abc, tmp_path):
     write_model("boltz", [a2, b], tmp_path, name="y", quiet=True)
     csvs = sorted(p.name for p in (tmp_path / "boltz" / "msas").glob("*.csv"))
     assert csvs == sorted({f"{m.seq_sha256}.csv" for m in (a2, b, c)})
+    pytest.importorskip("pyarrow")
     assert Chai.prepare([a2, c], out_dir=tmp_path / "chai", quiet=True) == (tmp_path / "chai").resolve()
 
 
