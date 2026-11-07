@@ -1,7 +1,7 @@
 """scigantic-msa command line.
 
     scigantic-msa run SEQ_OR_FASTA --model boltz --out DIR [--server colabfold|nvidia] [--yes]
-    scigantic-msa convert ALIGNMENT.a3m [MORE.a3m ...] --model af3 --out DIR
+    scigantic-msa convert ALIGNMENT.a3m [MORE.a3m ...] --model af3 --out DIR [--uniprot U.sto ...]
     scigantic-msa version
 
 ``run`` sends the sequence to the search server and asks once before it
@@ -120,7 +120,11 @@ def cmd_run(a: argparse.Namespace) -> int:
 
 def cmd_convert(a: argparse.Namespace) -> int:
     try:
-        chains = [read_alignment(Path(f)) for f in a.alignments]
+        uni = a.uniprot or []
+        if uni and len(uni) != len(a.alignments):
+            return die(f"--uniprot names {len(uni)} file(s) for {len(a.alignments)} alignment(s); give one per chain")
+        chains = [read_alignment(Path(f), uniprot=Path(u) if u else None)
+                  for f, u in zip(a.alignments, uni or [None] * len(a.alignments))]
         if a.sequence:
             want = [canonical_sequence(c) for c in a.sequence.split(":")]
             if len(want) != len(chains):
@@ -165,6 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--model", "-m", choices=MODELS, required=True)
     c.add_argument("--out", "-o", required=True, help="output directory")
     c.add_argument("--sequence", help="check the files' first records against these chains (':' between chains)")
+    c.add_argument("--uniprot", action="append", metavar="FILE",
+                   help="a UniProt alignment of the chain (.a3m or .sto, tr|ACC|NAME_SPECIES headers) used for "
+                        "pairing; repeat once per chain, in chain order")
     c.add_argument("--name", help="job name used for file names (default: the first file's name)")
     c.add_argument("--quiet", "-q", action="store_true")
     c.set_defaults(func=cmd_convert)
