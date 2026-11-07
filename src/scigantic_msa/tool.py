@@ -21,6 +21,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
+from . import http
 from .a3m import A3MError, parse_a3m, parse_stockholm
 from .alignment import _UNIPROT, Alignment
 from .cache import AlignmentCache, LockTimeout
@@ -233,6 +234,7 @@ def check_host(host: str, what: str = "--host") -> None:
     ("localhost:8080") gets an example of the right form. ``what`` names
     where the URL came from in the error."""
     host = host.strip()
+    http.require_ascii(host, what)
     parts = urllib.parse.urlsplit(host)
     if parts.scheme.lower() in ("http", "https"):
         if not parts.netloc:

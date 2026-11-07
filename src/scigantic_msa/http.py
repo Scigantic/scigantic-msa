@@ -182,3 +182,32 @@ def _short(url: str) -> str:
 def split_url(url: str) -> Tuple[str, str]:
     p = urllib.parse.urlsplit(url)
     return p.netloc, p.path
+
+
+def ascii_host(host: str) -> Optional[str]:
+    """A host name in its ASCII form (IDNA, so a fullwidth or accented name
+    becomes the one DNS answers for), or None when it has none."""
+    try:
+        return host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+
+
+def require_ascii(url: str, what: str) -> None:
+    """Refuse a URL with any non-ASCII character. urllib would send the
+    host as typed in the Host header and fail with a latin-1 error after
+    the tool had already said it was sending; and a fullwidth spelling of a
+    host name is the same server as its ASCII one. The error gives the
+    ASCII spelling when there is one."""
+    if url.isascii():
+        return
+    msg = f"{what} {url!r} has characters that are not ASCII; write the URL in ASCII"
+    parts = urllib.parse.urlsplit(url.strip())
+    plain = ascii_host(parts.hostname or "") if parts.hostname else None
+    if plain and parts.path.isascii():
+        try:
+            port = f":{parts.port}" if parts.port is not None else ""
+        except ValueError:
+            port = ""
+        msg += f", as in {parts.scheme}://{plain}{port}{parts.path}"
+    raise ValueError(msg)

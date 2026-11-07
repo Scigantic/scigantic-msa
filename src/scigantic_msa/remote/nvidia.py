@@ -43,6 +43,7 @@ class NvidiaClient:
         status_url: str = STATUS_URL,
     ):
         self.url = url or os.environ.get("SCIGANTIC_MSA_NVIDIA_URL") or DEFAULT_URL
+        http.require_ascii(self.url, "the NVIDIA server URL")
         self.api_key = api_key or os.environ.get("NVIDIA_API_KEY")
         self.databases = databases or ["all"]
         self.e_value = e_value
