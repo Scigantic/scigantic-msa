@@ -209,6 +209,15 @@ Environmental and metagenomic hits have none and stay unpaired. When
 pairing is not possible the tool says why, for example "no species is
 shared by all chains; the chains get unpaired MSAs".
 
+A chain with no species information at all (only environmental or
+clustered hits, or a designed binder) does not stop the others pairing.
+The tool names it, for example "paired 8 rows by species across chains A,
+B; chain C has no rows with species information (environmental or
+clustered hits only), so it is not paired", and in the paired rows that
+chain is filled in as each model expects: gaps for ColabFold and
+OpenFold3, gap rows that carry the pairing keys for Chai-1, key -1 for
+Boltz, and its own unpaired rows for AlphaFold 3.
+
 | model | how pairing is passed on |
 | --- | --- |
 | AlphaFold 3 | paired rows first in `unpairedMsa`; run with `--resolve_msa_overlaps=false` |

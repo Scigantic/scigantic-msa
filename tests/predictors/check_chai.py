@@ -4,11 +4,27 @@ them with Chai's own pairing code.
     python check_chai.py DIR SEQ [SEQ ...]
 """
 import json
+import logging
+import re
 import sys
 from pathlib import Path
 
 from chai_lab.data.dataset.msas import load
 from chai_lab.data.parsing.msas.aligned_pqt import expected_basename, parse_aligned_pqt_to_msa_context
+
+
+class _Paired(logging.Handler):
+    """Chai logs "Paired N rows" (the query counts as one) when it pairs."""
+
+    n = None
+
+    def emit(self, record):
+        m = re.match(r"Paired (\d+) rows", record.getMessage())
+        if m:
+            _Paired.n = int(m.group(1))
+
+
+logging.getLogger("chai_lab.data.dataset.msas.preprocess").addHandler(_Paired())
 
 d = Path(sys.argv[1])
 ctxs = []
@@ -23,5 +39,5 @@ for seq in sys.argv[2:]:
 if len(ctxs) > 1:
     merged = load.pair_and_merge_msas(ctxs)
     out["merged_depth"] = int(merged.depth)
-    out["paired_rows"] = int(merged.is_paired_mask.any(dim=-1).sum()) if hasattr(merged, "is_paired_mask") else None
+    out["paired_rows"] = _Paired.n
 print(json.dumps(out))

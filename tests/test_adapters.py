@@ -128,7 +128,7 @@ def test_boltz_says_when_chains_cannot_be_paired(tmp_path, capsys):
     a = synthetic("MKVLAG", ["MRVLAG"], headers={0: "SRR1_2"})
     b = synthetic("GHSEQK", ["GHTEQK"], {0: "9606"})
     Boltz.prepare([a, b], out_dir=tmp_path)
-    assert "no pairing: chain(s) 1 have no rows with species information" in capsys.readouterr().err
+    assert "no pairing: chain A has no rows with species information" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------- Chai-1

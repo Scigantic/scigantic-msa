@@ -8,6 +8,14 @@
   on such a letter with `KeyError`.
 - Tests: an opt-in test runs Protenix's own JSON parser and MSA
   featurisation on the files, with `SCIGANTIC_MSA_TEST_PROTENIX_PYTHON`.
+- A complex with a chain that has no species information (environmental or
+  clustered hits only) keeps pairing for the other chains with AlphaFold 3,
+  Boltz, Chai-1, ColabFold and OpenFold3. Before, only Protenix did; the
+  others silently lost all pairing. The notice names the unpaired chain.
+- Pairing notices name chains by id (`chain C`), not by their position
+  among the distinct sequences (`chain(s) 3`).
+- `Pairing.rows` holds `None` for every row of a chain without species
+  information. `pair_by_species` takes `names=` for its message.
 
 ## 0.2.3
 
