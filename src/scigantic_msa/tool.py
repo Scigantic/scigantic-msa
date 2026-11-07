@@ -73,6 +73,10 @@ class MSA:
             if host:
                 check_host(host)
                 kw["host" if server == "colabfold" else "url"] = host
+            else:
+                env = _HOST_ENV[server]
+                if os.environ.get(env):
+                    check_host(os.environ[env], env)
             backend = make_backend(server, **kw)
         self.backend = backend
         self.server = backend.name
@@ -142,7 +146,9 @@ class MSA:
                 "Pass remote=True to allow that, or use MSA().from_a3m() with an alignment you already have."
             )
         if remote_disabled():
-            raise RemoteNotAllowed("SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to any server")
+            # A cached result sends nothing, so the kill switch allows it.
+            if any(self._cache_get(seq_sha256(q)) is None for q in queries):
+                raise RemoteNotAllowed("SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to any server")
         done: Dict[str, Alignment] = {}
         for i, q in enumerate(queries, 1):
             if q not in done:
@@ -172,6 +178,8 @@ class MSA:
                 if again is not None:
                     self._say(f"{what}: computed by another process while waiting")
                     return again
+            if remote_disabled():
+                raise RemoteNotAllowed("SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to any server")
             if not self.quiet:
                 announce(b)
             res = b.search(q)
@@ -213,17 +221,22 @@ class MSA:
             print(f"scigantic-msa: {msg}", file=sys.stderr, flush=True)
 
 
-def check_host(host: str) -> None:
+#: The environment variable that sets each server's URL.
+_HOST_ENV = {"colabfold": "SCIGANTIC_MSA_COLABFOLD_URL", "nvidia": "SCIGANTIC_MSA_NVIDIA_URL"}
+
+
+def check_host(host: str, what: str = "--host") -> None:
     """Refuse a server URL that is not http(s)://host. A missing scheme
-    ("localhost:8080") gets an example of the right form."""
+    ("localhost:8080") gets an example of the right form. ``what`` names
+    where the URL came from in the error."""
     parts = urllib.parse.urlsplit(host)
     if parts.scheme in ("http", "https"):
         if parts.netloc:
             return
-        raise ValueError(f"--host {host!r} has no host name")
+        raise ValueError(f"{what} {host!r} has no host name")
     if "://" in host:
-        raise ValueError(f"--host must start with http:// or https://, not {parts.scheme}://")
-    raise ValueError(f"--host needs http:// or https:// in front, for example http://{host}")
+        raise ValueError(f"{what} must start with http:// or https://, not {parts.scheme}://")
+    raise ValueError(f"{what} needs http:// or https:// in front, for example http://{host}")
 
 
 def _is_default_host(backend: Any) -> bool:
