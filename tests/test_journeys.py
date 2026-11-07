@@ -201,3 +201,16 @@ def test_stdin_bytes_are_read(fake, tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", Stdin(""))
     assert run("-", "-m", "boltz", "-o", str(tmp_path / "o"), "--yes") == 0
     assert fake.calls == [Q]
+
+
+def test_python_dash_m_runs_the_command_line():
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import scigantic_msa
+
+    src = str(Path(scigantic_msa.__file__).parent.parent)
+    p = subprocess.run([sys.executable, "-m", "scigantic_msa", "version"], capture_output=True, text=True,
+                       env={"PYTHONPATH": src, "PATH": "/usr/bin:/bin"}, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0 and p.stdout.startswith("scigantic-msa ")

@@ -15,7 +15,9 @@ pip install scigantic-msa            # or: uv tool install scigantic-msa
 pip install 'scigantic-msa[chai]'    # adds pyarrow, needed for Chai-1 files
 ```
 
-Python 3.10 or newer. The core has no dependencies.
+Python 3.10 or newer. The core has no dependencies. If your shell cannot
+find `scigantic-msa` after installing, `python -m scigantic_msa` runs the same
+command.
 
 ## Privacy
 
