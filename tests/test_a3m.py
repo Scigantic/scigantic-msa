@@ -1,8 +1,8 @@
 import pytest
 
-from conftest import Q_1HVW, Q_6T33, Q_LITEFOLD, REAL, real
+from conftest import Q_1HVW, Q_6T33, Q_LITEFOLD, real
 from scigantic_msa.a3m import (
-    A3MError, Row, a3m_query, format_a3m, match_length, parse_a3m, parse_colabfold_complex, parse_stockholm,
+    A3MError, a3m_query, format_a3m, match_length, parse_a3m, parse_colabfold_complex, parse_stockholm,
 )
 
 

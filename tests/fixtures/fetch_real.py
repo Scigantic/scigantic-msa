@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import sys
 import urllib.request
 from pathlib import Path
