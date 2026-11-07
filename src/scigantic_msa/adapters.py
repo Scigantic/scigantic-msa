@@ -649,6 +649,17 @@ def _check_protenix_chain(pc: Dict[str, Any], what: str) -> List[str]:
     return out
 
 
+#: Most bytes of a job name in a file name. NAME_MAX is 255 bytes on Linux,
+#: and the name still gets an extension and maybe a _2 suffix.
+NAME_BYTES = 200
+#: Names Windows will not create a file under, with or without an extension.
+_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10))}
+
+
 def _safe_name(name: str) -> str:
     s = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".")
-    return s[:100] or "query"
+    while len(s.encode()) > NAME_BYTES:
+        s = s[:-1]
+    if s.split(".")[0].upper() in _RESERVED:
+        s = "_" + s
+    return s or "query"

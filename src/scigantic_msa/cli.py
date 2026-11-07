@@ -41,6 +41,9 @@ MIN_LITERAL = 10
 #: Most chains in one complex, and most jobs in one --batch run.
 MAX_CHAINS = 20
 MAX_JOBS = 100
+#: Most new sequences one run sends to the public server, which takes about
+#: one new job a minute for everyone.
+MAX_PUBLIC_SEARCHES = 100
 #: Below this many sequences an alignment is called shallow.
 LOW_DEPTH = 20
 
@@ -163,6 +166,10 @@ def _check_typed(arg: str, chains: List[str]) -> None:
     sequence because it is so short."""
     short = min(len(c) for c in chains)
     if short < MIN_LITERAL:
+        if len(arg) > 40:
+            # Too long to be a file name: do not echo the sequence back.
+            raise InputError(f"a chain of the sequence has only {short} residues. To send a short chain "
+                             "on purpose, put '=' in front of the whole argument.")
         raise InputError(f"{arg!r} is not a file, and as a sequence it has only {short} residues. "
                          f"To send a short sequence on purpose, write it as ={arg}.")
 
@@ -214,15 +221,23 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
     return jobs
 
 
-def _unusable_out(out: Path) -> Optional[str]:
-    """Why --out cannot be written, checked before anything is sent, or None."""
-    p = out
-    while not p.exists() and p != p.parent:
-        p = p.parent
-    if not p.is_dir():
-        return f"--out {out}: {p} is not a directory"
-    if not os.access(p, os.W_OK | os.X_OK):
-        return f"--out {out}: cannot write to {p}"
+def _unusable_out(out: Path, model: Optional[str] = None, jobs: Optional[List[str]] = None) -> Optional[str]:
+    """Why --out cannot be written, checked before anything is sent, or None.
+    With a model, also the folders the model's files go in, under each
+    job's folder for a batch."""
+    targets = [out]
+    if model:
+        sub = (model,) if model in ("af3", "colabfold") else (model, "msas")
+        for base in [out / j for j in jobs] if jobs else [out]:
+            targets.append(base.joinpath(*sub))
+    for t in targets:
+        p = t
+        while not p.exists() and p != p.parent:
+            p = p.parent
+        if not p.is_dir():
+            return f"--out {out}: {p} is not a directory"
+        if not os.access(p, os.W_OK | os.X_OK):
+            return f"--out {out}: cannot write to {p}"
     return None
 
 
@@ -236,11 +251,14 @@ def _warn_nucleic(jobs: List[Tuple[str, List[str]]]) -> None:
                       "This tool searches protein databases.", file=sys.stderr)
 
 
-def _depths(chains: List[Alignment], quiet: bool) -> None:
+def _depths(chains: List[Alignment], quiet: bool, job: Optional[str] = None) -> None:
     """Say how deep each chain's alignment is, and warn when it is so
-    shallow that the model will in effect run on the sequence alone."""
+    shallow that the model will in effect run on the sequence alone. In a
+    batch, ``job`` names the job, since -q hides the job lines."""
     for i, c in enumerate(chains, 1):
         what = f"chain {i}" if len(chains) > 1 else "sequence"
+        if job:
+            what = f"{job}: {what}"
         d = c.depth
         if not quiet:
             print(f"{what}: depth {d}", file=sys.stderr)
@@ -264,7 +282,8 @@ def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple
     """None to go ahead, or an exit code."""
     n = len(pending)
     if n > 10:
-        lengths = f"{min(map(len, pending))} to {max(map(len, pending))}"
+        lo, hi = min(map(len, pending)), max(map(len, pending))
+        lengths = f"{lo} to {hi}" if lo != hi else f"{lo} each"
     else:
         lengths = ", ".join(str(len(q)) for q in pending)
     if jobs and len(jobs) > 1:
@@ -274,8 +293,8 @@ def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple
     print(f"This sends {n} sequence{'s' if n > 1 else ''} (length {lengths}) to {tool.describe_server()}.",
           file=sys.stderr)
     if n > 1 and tool.server == "colabfold" and _is_default_host(tool.backend):
-        print(f"The public server takes about one new job per minute, so this takes at least {n} minutes.",
-              file=sys.stderr)
+        print(f"The public server takes about one new job per minute, so this can take {n} minutes or more "
+              "(less for sequences the server has already searched).", file=sys.stderr)
     if yes:
         return None
     if not sys.stdin.isatty():
@@ -297,7 +316,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     except (InvalidSequence, InputError, OSError) as e:
         return die(str(e))
     _warn_nucleic(jobs)
-    bad_out = _unusable_out(Path(a.out))
+    bad_out = _unusable_out(Path(a.out), a.model, [n for n, _ in jobs] if a.batch else None)
     if bad_out:
         return die(bad_out)
     try:
@@ -308,6 +327,16 @@ def cmd_run(a: argparse.Namespace) -> int:
     if pending and remote_disabled():
         return die("remote search is disabled (SCIGANTIC_MSA_NO_REMOTE is set), so nothing was sent. "
                    "Use 'scigantic-msa convert' with an alignment you already have.")
+    if len(pending) > MAX_PUBLIC_SEARCHES and tool.server == "colabfold" and _is_default_host(tool.backend):
+        return die(f"this would send {len(pending)} new sequences to the public ColabFold server; one run sends "
+                   f"at most {MAX_PUBLIC_SEARCHES}. Nothing was sent. Split the input into smaller runs, or use "
+                   "your own server with --host.")
+    check = getattr(tool.backend, "check_ready", None)
+    if pending and check is not None:
+        try:
+            check()
+        except RemoteError as e:
+            return die(f"{e}. Nothing was sent.")
     if pending:
         rc = _confirm(tool, pending, a.yes, jobs)
         if rc is not None:
@@ -333,7 +362,7 @@ def cmd_run(a: argparse.Namespace) -> int:
                 failed.append(name)
                 continue
             _report(files, nxt, a.quiet)
-            _depths(got, a.quiet)
+            _depths(got, a.quiet, name if a.batch else None)
     except (RemoteError, RemoteNotAllowed, A3MError, PrepareError, ImportError, OSError, ValueError) as e:
         return die(str(e))
     except KeyboardInterrupt:
@@ -350,6 +379,8 @@ def cmd_run(a: argparse.Namespace) -> int:
 def cmd_convert(a: argparse.Namespace) -> int:
     try:
         uni = a.uniprot or []
+        if any(not u.strip() for u in uni):
+            return die("--uniprot was given an empty file name")
         if uni and len(uni) != len(a.alignments):
             return die(f"--uniprot names {len(uni)} file(s) for {len(a.alignments)} alignment(s); give one per chain")
         chains = [read_alignment(Path(f), uniprot=Path(u) if u else None)

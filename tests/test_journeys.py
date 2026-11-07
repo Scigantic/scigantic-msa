@@ -178,7 +178,7 @@ def test_public_server_batch_says_how_long_it_takes(monkeypatch, tmp_path, capsy
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
     # No --yes and no terminal: it stops after saying what it would send.
     assert run(str(_three(tmp_path)), "-m", "boltz", "-o", str(tmp_path / "o"), "--batch") == 2
-    assert "at least 3 minutes" in capsys.readouterr().err
+    assert "3 minutes or more" in capsys.readouterr().err
     assert run(Q, "-m", "boltz", "-o", str(tmp_path / "o")) == 2
     assert "minutes" not in capsys.readouterr().err
 

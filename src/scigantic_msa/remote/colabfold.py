@@ -38,7 +38,8 @@ from .. import http
 from ..a3m import A3MError, Row, parse_a3m
 from ..seqkey import canonical_sequence
 
-__all__ = ["ColabFoldClient", "RemoteError", "RateLimited", "JobFailed", "RemoteResult", "ticket_id", "DEFAULT_HOST"]
+__all__ = ["ColabFoldClient", "RemoteError", "RateLimited", "JobFailed", "RemoteResult", "ticket_id", "DEFAULT_HOST",
+           "public_host"]
 
 DEFAULT_HOST = "https://api.colabfold.com"
 ENV_A3M = "bfd.mgnify30.metaeuk30.smag30.a3m"
@@ -47,6 +48,19 @@ TERMS = (
     "(a few thousand MSAs per day for everyone). Results are not private: anyone who "
     "knows the sequence can compute the job id and download the result."
 )
+
+
+def public_host(host: str) -> bool:
+    """True for any spelling of the public server's URL: another case, an
+    explicit default port, a trailing slash or surrounding spaces."""
+    parts = urllib.parse.urlsplit(host.strip())
+    try:
+        port = parts.port
+    except ValueError:
+        return False
+    default = {"https": 443, "http": 80}.get(parts.scheme.lower())
+    return (default is not None and port in (None, default) and parts.path in ("", "/")
+            and (parts.hostname or "").rstrip(".") == "api.colabfold.com")
 
 
 class RemoteError(Exception):
@@ -103,7 +117,10 @@ class ColabFoldClient:
         clock: Optional[Callable[[], float]] = None,
         on_status: Optional[Callable[[str, str], None]] = None,
     ):
-        self.host = (host or os.environ.get("SCIGANTIC_MSA_COLABFOLD_URL") or DEFAULT_HOST).rstrip("/")
+        host = (host or os.environ.get("SCIGANTIC_MSA_COLABFOLD_URL") or DEFAULT_HOST).strip().rstrip("/")
+        # One spelling for the public server, so it gets its warning and
+        # cache entries, and over https: http would send the sequence in clear.
+        self.host = DEFAULT_HOST if public_host(host) else host
         self.mode = mode
         contact = contact or os.environ.get("SCIGANTIC_MSA_CONTACT")
         self.user_agent = http.USER_AGENT + (f" {contact}" if contact else "")
@@ -267,7 +284,7 @@ class ColabFoldClient:
             tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz")
             members = {m.name.lstrip("./"): m for m in tf.getmembers() if m.isfile()}
         except (tarfile.TarError, OSError, EOFError) as e:
-            raise RemoteError(f"download for job {tid} is not a valid tar.gz: {e}") from None
+            raise JobFailed(f"download for job {tid} is not a valid tar.gz: {e}") from None
 
         def read(name: str) -> Optional[bytes]:
             m = members.get(name)

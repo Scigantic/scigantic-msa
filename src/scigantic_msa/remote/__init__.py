@@ -6,7 +6,7 @@ import sys
 import threading
 from typing import Any, Optional, Set
 
-from .colabfold import DEFAULT_HOST, ColabFoldClient, JobFailed, RateLimited, RemoteError, RemoteResult
+from .colabfold import DEFAULT_HOST, ColabFoldClient, JobFailed, RateLimited, RemoteError, RemoteResult, public_host
 from .nvidia import NvidiaClient
 
 __all__ = [
@@ -21,9 +21,11 @@ _lock = threading.Lock()
 
 
 def remote_disabled() -> bool:
-    """SCIGANTIC_MSA_NO_REMOTE=1 turns every remote backend off, whatever the
-    code or config asks for."""
-    return os.environ.get("SCIGANTIC_MSA_NO_REMOTE", "").strip().lower() in ("1", "true", "yes")
+    """SCIGANTIC_MSA_NO_REMOTE turns every remote backend off, whatever the
+    code or config asks for. Any value but 0, false, no or off counts, so a
+    value we did not think of fails safe."""
+    value = os.environ.get("SCIGANTIC_MSA_NO_REMOTE", "").strip().lower()
+    return value not in ("", "0", "false", "no", "off")
 
 
 def make_backend(name: str, **kw: Any):
@@ -42,7 +44,7 @@ def announce(backend: Any, stream: Optional[Any] = None) -> None:
             return
         _announced.add(key)
     msg = f"scigantic-msa: sending the sequence to {backend.server_name} ({backend.name} backend)."
-    if backend.name == "colabfold" and str(getattr(backend, "host", DEFAULT_HOST)).rstrip("/") == DEFAULT_HOST:
+    if backend.name == "colabfold" and public_host(str(getattr(backend, "host", DEFAULT_HOST))):
         msg += " Results on that public server can be read by anyone who knows the sequence."
     if getattr(backend, "experimental", False):
         msg += " This backend is experimental."

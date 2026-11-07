@@ -60,9 +60,14 @@ class NvidiaClient:
     def dbkey(self) -> str:
         return "-".join(sorted(self.databases))
 
-    def _headers(self) -> Dict[str, str]:
+    def check_ready(self) -> None:
+        """Raise RemoteError when a search cannot even start, before anyone
+        is asked to confirm sending a sequence."""
         if not self.api_key:
             raise RemoteError("the NVIDIA backend needs an API key: set NVIDIA_API_KEY")
+
+    def _headers(self) -> Dict[str, str]:
+        self.check_ready()
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",

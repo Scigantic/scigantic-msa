@@ -72,7 +72,7 @@ class MSA:
             kw: Dict[str, Any] = {}
             if host:
                 check_host(host)
-                kw["host" if server == "colabfold" else "url"] = host
+                kw["host" if server == "colabfold" else "url"] = host.strip()
             else:
                 env = _HOST_ENV[server]
                 if os.environ.get(env):
@@ -232,11 +232,16 @@ def check_host(host: str, what: str = "--host") -> None:
     """Refuse a server URL that is not http(s)://host. A missing scheme
     ("localhost:8080") gets an example of the right form. ``what`` names
     where the URL came from in the error."""
+    host = host.strip()
     parts = urllib.parse.urlsplit(host)
-    if parts.scheme in ("http", "https"):
-        if parts.netloc:
-            return
-        raise ValueError(f"{what} {host!r} has no host name")
+    if parts.scheme.lower() in ("http", "https"):
+        if not parts.netloc:
+            raise ValueError(f"{what} {host!r} has no host name")
+        if any(c.isspace() for c in host):
+            raise ValueError(f"{what} {host!r} has a space in it")
+        if parts.query or parts.fragment or "?" in host or "#" in host:
+            raise ValueError(f"{what} {host!r} has a query or fragment; give only the server's URL")
+        return
     if "://" in host:
         raise ValueError(f"{what} must start with http:// or https://, not {parts.scheme}://")
     raise ValueError(f"{what} needs http:// or https:// in front, for example http://{host}")
@@ -246,7 +251,7 @@ def _is_default_host(backend: Any) -> bool:
     from .remote import colabfold, nvidia
 
     if backend.name == "colabfold" and hasattr(backend, "host"):
-        return str(backend.host).rstrip("/") == colabfold.DEFAULT_HOST
+        return colabfold.public_host(str(backend.host))
     if backend.name == "nvidia" and hasattr(backend, "url"):
         return str(backend.url) == nvidia.DEFAULT_URL
     return True

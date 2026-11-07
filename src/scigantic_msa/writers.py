@@ -475,10 +475,11 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
             }
         )
         p = d / name
-        d.mkdir(parents=True, exist_ok=True)
-        tmp = d / ("." + name + ".tmp")
-        pq.write_table(table, tmp)
-        os.replace(tmp, p)
+        buf = pa.BufferOutputStream()
+        pq.write_table(table, buf)
+        # A unique temp name, so writers sharing one msas folder do not
+        # write into each other's file.
+        _atomic_write(p, buf.getvalue().to_pybytes())
         out[m.query] = p
     _sidecar(d, chains, notes, {m.seq_sha256: out[m.query].name for m in msas})
     return [out[m.query] for m in chains]

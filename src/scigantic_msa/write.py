@@ -19,7 +19,7 @@ import shlex
 from pathlib import Path
 from typing import List, Tuple
 
-from .adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, Protenix
+from .adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, Protenix, _safe_name
 from .alignment import Alignment
 
 #: The model names ``write_model`` accepts, same strings as ``--model``.
@@ -36,6 +36,8 @@ def write_model(model: str, chains: List[Alignment], out: "str | Path", name: st
     predictions."""
     if model not in MODELS:
         raise ValueError(f"unknown model {model}")
+    # The adapters fall back to different names for "", so pick one here.
+    name = name or "query"
     out = Path(out) / model
     out.mkdir(parents=True, exist_ok=True)
     if model == "af3":
@@ -77,5 +79,4 @@ def _q(path: "str | Path") -> str:
 
 
 def _fname(name: str) -> str:
-    s = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".")
-    return s[:100] or "query"
+    return _safe_name(name)

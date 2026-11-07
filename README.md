@@ -41,13 +41,15 @@ Your sequence may be unpublished, so read this before you run a search.
   `--no-cache`. If the cache directory cannot be written (read-only home,
   say), the tool warns once and runs without it.
 - `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks.
-  Results already in the cache are still used, since they send nothing.
+  Any value but `0`, `false`, `no` or `off` counts. Results already in the
+  cache are still used, since they send nothing.
 
 The public ColabFold server is a shared resource with a rate limit of about
 one new job per minute per IP address. This client backs off, honours
 Retry-After, resumes a job from its id instead of submitting it again, and
-gives up after a bounded wait. To use your own server, pass `--host URL`
-(or `MSA(host=URL)`).
+gives up after a bounded wait. One `run` sends at most 100 new sequences
+to it; split larger inputs into several runs. To use your own server, pass
+`--host URL` (or `MSA(host=URL)`).
 
 ## Command line
 
@@ -91,10 +93,12 @@ shallow or holds only the query, which makes the model run in
 single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
 
-`--host` takes an `http://` or `https://` URL, and so do
-`SCIGANTIC_MSA_COLABFOLD_URL` and `SCIGANTIC_MSA_NVIDIA_URL`.
-`--server nvidia` uses NVIDIA's hosted MSA Search and needs
-`NVIDIA_API_KEY`.
+`--host` takes an `http://` or `https://` URL with no spaces, query or
+fragment, and so do `SCIGANTIC_MSA_COLABFOLD_URL` and
+`SCIGANTIC_MSA_NVIDIA_URL`. Any spelling of the public server's URL
+(`HTTPS://API.colabfold.com:443/`, say) is the public server, reached over
+https. `--server nvidia` uses NVIDIA's hosted MSA Search and needs
+`NVIDIA_API_KEY`; without it, `run` stops before asking to send.
 
 Each model's files go in their own folder under `--out` (`job/boltz/`,
 `job/af3/` and so on), so several models can share one `--out` without
@@ -269,7 +273,7 @@ files.
 | variable | meaning |
 | --- | --- |
 | `SCIGANTIC_MSA_CACHE` | cache directory (default `~/.cache/scigantic-msa`) |
-| `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server |
+| `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server (any value but `0`, `false`, `no`, `off`) |
 | `SCIGANTIC_MSA_COLABFOLD_URL` | another ColabFold MMseqs2 server |
 | `SCIGANTIC_MSA_NVIDIA_URL` | another NVIDIA MSA Search endpoint |
 | `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to the server, such as an email address |
