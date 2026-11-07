@@ -130,3 +130,9 @@ def test_output_names(tmp_path):
     q = json.loads((tmp_path / "my_job.json").read_text())
     assert list(q["queries"]) == ["my job"]
     assert Path(q["queries"]["my job"]["chains"][0]["main_msa_file_paths"]).is_dir()
+
+
+def test_run_with_a_missing_file_sends_nothing(colabfold, tmp_path, capsys):
+    FakeColabFold(colabfold, ["COMPLETE"])
+    assert main(["run", str(tmp_path / "chains.fasta"), "-m", "af3", "-o", str(tmp_path / "o"), "-y"]) == 1
+    assert "not amino acid letters" in capsys.readouterr().err and sent(colabfold) == 0

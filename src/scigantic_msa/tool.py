@@ -24,7 +24,7 @@ from .a3m import A3MError, parse_a3m, parse_stockholm
 from .alignment import Alignment
 from .cache import AlignmentCache
 from .remote import BACKENDS, announce, make_backend, remote_disabled
-from .seqkey import canonical_sequence, seq_sha256
+from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
 
 log = logging.getLogger("scigantic_msa")
 
@@ -109,7 +109,7 @@ class MSA:
         seqs: List[str] = [sequence] if isinstance(sequence, str) else list(sequence)
         if not seqs:
             raise ValueError("no sequence given")
-        queries = [canonical_sequence(s) for s in seqs]
+        queries = [protein_sequence(s, i) for i, s in enumerate(seqs, 1)]
         if remote is not True:
             raise RemoteNotAllowed(
                 f"MSA().get() sends the sequence to {self.describe_server()}. "
@@ -173,6 +173,17 @@ class MSA:
         log.info(msg)
         if not self.quiet:
             print(f"scigantic-msa: {msg}", file=sys.stderr, flush=True)
+
+
+def protein_sequence(seq: str, i: int) -> str:
+    """Canonical sequence, refusing anything that is not letters (a mistyped
+    file name, say) before it can be sent. The error names only the
+    offending characters."""
+    q = canonical_sequence(seq)
+    bad = sorted({c for c in q if not ("A" <= c <= "Z")})
+    if bad:
+        raise InvalidSequence(f"sequence {i} has characters that are not amino acid letters: {''.join(bad)!r}")
+    return q
 
 
 def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None) -> Alignment:

@@ -24,7 +24,7 @@ from .alignment import Alignment
 from .remote import BACKENDS
 from .remote.colabfold import RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
-from .tool import MSA, RemoteNotAllowed, read_alignment
+from .tool import MSA, RemoteNotAllowed, protein_sequence, read_alignment
 
 MODELS = ("af3", "boltz", "chai", "colabfold", "openfold3", "protenix")
 
@@ -136,6 +136,7 @@ def _confirm(tool: MSA, pending: List[str], yes: bool) -> Optional[int]:
 def cmd_run(a: argparse.Namespace) -> int:
     try:
         name, chains = read_chains(a.sequence)
+        chains = [protein_sequence(c, i) for i, c in enumerate(chains, 1)]
     except (InvalidSequence, OSError) as e:
         return die(str(e))
     name = a.name or name

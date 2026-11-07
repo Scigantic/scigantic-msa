@@ -130,3 +130,14 @@ def test_from_a3m_checks_the_sequence(tmp_path):
         MSA().from_a3m(f">q\n{Q_6T33}\n", sequence=Q_6T33[:-1] + "W")
     with pytest.raises(FileNotFoundError):
         MSA().from_a3m(tmp_path / "missing.a3m")
+
+
+def test_a_mistyped_file_name_is_not_sent(colabfold):
+    FakeColabFold(colabfold, ["COMPLETE"])
+    from scigantic_msa import InvalidSequence
+
+    with pytest.raises(InvalidSequence, match="not amino acid letters: '._'"):
+        MSA().get("my_chains.fasta", remote=True)
+    with pytest.raises(InvalidSequence, match="sequence 2"):
+        MSA().get([Q_LIVE, "MKV1"], remote=True)
+    assert calls(colabfold) == 0
