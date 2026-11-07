@@ -322,3 +322,19 @@ def test_public_api_shape(tmp_path):
     assert isinstance(ColabFold.prepare(result, out_dir=tmp_path / "cf"), Path)
     assert "queries" in OpenFold3.prepare(result, out_dir=tmp_path / "of3")
     assert Protenix.prepare(result, out_dir=tmp_path / "px")[0]["sequences"]
+
+
+def test_protenix_leaves_out_rows_whose_species_it_cannot_read(tmp_path):
+    # Our pairing reads a lowercase UniProt accession; Protenix's pattern does not.
+    a = synthetic("MKVLAG", ["MRVLAG", "MKILAG"], headers={0: "tr|a0a146skv9|A0A146SKV9_FUNHE", 1: "tr|Q9XYZ1|Q9XYZ1_FUNHE"})
+    b = synthetic("GHSEQK", ["GHTEQK"], headers={0: "tr|Q8ABC1|Q8ABC1_FUNHE"})
+    jobs = Protenix.prepare([a, b], out_dir=tmp_path, quiet=True)
+    rows = parse_a3m(Path(jobs[0]["sequences"][0]["proteinChain"]["pairedMsaPath"]).read_text(), a.query)
+    assert [r.header for r in rows[1:]] == ["tr|Q9XYZ1|Q9XYZ1_FUNHE"]
+
+
+def test_protenix_prepare_checks_its_own_output(tmp_path, monkeypatch):
+    m = real_alignment(Q_6T33)
+    monkeypatch.setattr(Alignment, "a3m", lambda self, max_rows=None: "")
+    with pytest.raises(PrepareError, match="non_pairing.a3m is empty"):
+        Protenix.prepare(m, out_dir=tmp_path)
