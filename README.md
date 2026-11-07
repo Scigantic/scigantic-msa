@@ -49,15 +49,40 @@ gives up after a bounded wait. To use your own server, pass `--host URL`
 
 ```
 scigantic-msa run SEQ_OR_FASTA --model boltz --out job/
-scigantic-msa run chains.fasta --model af3 --out job/ --yes
+scigantic-msa run chains.fasta --complex --model af3 --out job/ --yes
+scigantic-msa run many.fasta --batch --model boltz --out jobs/
 scigantic-msa convert my_alignment.a3m --model protenix --out job/
 scigantic-msa version
 ```
 
 `--model` is one of `af3`, `boltz`, `chai`, `colabfold`, `openfold3`,
-`protenix`. A FASTA file with several records is one complex, one chain per
-record; `:` inside a sequence also separates chains. `convert` takes one
-A3M (or `.a3m.gz`, or Stockholm `.sto`) per chain, in chain order.
+`protenix`. `convert` takes one A3M (or `.a3m.gz`, or Stockholm `.sto`) per
+chain, in chain order.
+
+The argument to `run` is a FASTA file, `-` for stdin, or the sequence
+itself. So that a mistyped file name is never sent as a protein, a typed
+argument is refused when it names a directory, when a file with that name
+plus an extension exists (`query` next to `query.fasta`), or when it is
+shorter than 10 residues. To send a short peptide on purpose, start it
+with `=`, as in `=MKVLAAG`. A sequence that is only `A`, `C`, `G`, `T`,
+`U` and `N` gets a warning that it looks like DNA or RNA.
+
+`:` inside a sequence separates the chains of one complex. A FASTA file
+with several records needs one of:
+
+- `--complex`: the records are one complex, one chain per record (at most
+  20 chains).
+- `--batch`: each record is its own job, written to its own folder under
+  `--out` and named after the record (at most 100 jobs).
+
+Before sending, `run` says how many sequences go to which server, and for
+a complex or batch, how many chains or jobs. After writing, `run` and
+`convert` print the depth of each chain's alignment, and warn when it is
+shallow or holds only the query, which makes the model run in
+single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
+same command again: it picks up the same job without sending it again.
+
+`--host` takes an `http://` or `https://` URL.
 `--server nvidia` uses NVIDIA's hosted MSA Search and needs
 `NVIDIA_API_KEY`.
 
