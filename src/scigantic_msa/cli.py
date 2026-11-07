@@ -17,7 +17,7 @@ from . import __version__
 from .a3m import A3MError
 from .core import MSANotFound, get_msa, get_msas, resolve_remote, where
 from .index import Index, IndexIntegrityError, IndexUnavailable, index_url
-from .msa import MSA
+from .alignment import Alignment
 from .remote import remote_disabled
 from .remote.colabfold import TERMS
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
@@ -66,7 +66,7 @@ def read_jobs(arg: str) -> List[Tuple[str, List[str]]]:
 
 def write_output(result: Any, fmt: str, out: Optional[str], *, af3_input: Optional[str], name: str) -> str:
     """Write one job. Returns a short description of what was written."""
-    chains = list(result) if not isinstance(result, MSA) else [result]
+    chains = list(result) if not isinstance(result, Alignment) else [result]
     if fmt == "a3m":
         if len(chains) > 1:
             raise ValueError("--format a3m is for one chain; use colabfold, af3, boltz, chai or openfold3 for a complex")
@@ -93,13 +93,13 @@ def write_output(result: Any, fmt: str, out: Optional[str], *, af3_input: Option
         result.to_af3_json(p, **kw)
         return str(p)
     if fmt == "boltz":
-        lines = result.to_boltz(p) if not isinstance(result, MSA) else [result.to_boltz(p)]
+        lines = result.to_boltz(p) if not isinstance(result, Alignment) else [result.to_boltz(p)]
         return f"{p} (YAML: " + "; ".join(lines) + ")"
     if fmt == "chai":
         written = result.to_chai(p)
         return str(p) if not isinstance(written, Path) else str(written)
     if fmt == "openfold3":
-        fields = result.to_openfold3(p) if not isinstance(result, MSA) else [result.to_openfold3(p)]
+        fields = result.to_openfold3(p) if not isinstance(result, Alignment) else [result.to_openfold3(p)]
         return f"{p} (query JSON fields: {json.dumps(fields)})"
     raise ValueError(f"unknown format {fmt}")
 

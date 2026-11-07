@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:  # pragma: no cover
-    from .msa import MSA
+    from .alignment import Alignment
 
 __all__ = ["cache_dir", "atomic_write", "FileLock", "AlignmentCache", "FileCache"]
 
@@ -159,9 +159,9 @@ class AlignmentCache:
         files = [p for p in d.iterdir() if p.name.endswith(".msa.gz") and not p.name.startswith(".")]
         return sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
 
-    def get(self, sha: str, backend: Optional[str] = None, dbkey: Optional[str] = None) -> "Optional[MSA]":
+    def get(self, sha: str, backend: Optional[str] = None, dbkey: Optional[str] = None) -> "Optional[Alignment]":
         from .a3m import A3MError
-        from .msa import MSA
+        from .alignment import Alignment
 
         if backend is not None and dbkey is not None:
             candidates = [self.path(sha, backend, dbkey)]
@@ -175,7 +175,7 @@ class AlignmentCache:
             except OSError:
                 continue
             try:
-                msa = MSA.from_bundle(data, source="cache")
+                msa = Alignment.from_bundle(data, source="cache")
             except (A3MError, ValueError):
                 # A corrupt entry is removed so it cannot shadow a good one.
                 try:
@@ -190,7 +190,7 @@ class AlignmentCache:
             return msa
         return None
 
-    def put(self, msa: "MSA", backend: str, dbkey: str) -> Path:
+    def put(self, msa: "Alignment", backend: str, dbkey: str) -> Path:
         p = self.path(msa.seq_sha256, backend, dbkey)
         atomic_write(p, msa.to_bundle(), mode=0o600)
         return p

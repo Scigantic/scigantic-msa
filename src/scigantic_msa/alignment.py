@@ -1,4 +1,4 @@
-"""The MSA result object."""
+"""The alignment result object."""
 from __future__ import annotations
 
 import gzip
@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from .a3m import A3MError, Row, classify_header, format_a3m, parse_a3m, ungapped
 from .seqkey import canonical_sequence, seq_sha256
 
-__all__ = ["MSA", "SOURCES", "classify_header", "species_key"]
+__all__ = ["Alignment", "SOURCES", "classify_header", "species_key"]
 
 #: Where a result came from. Every MSA has exactly one of these in ``.source``.
 SOURCES = ("exact", "near", "remote", "cache")
@@ -48,7 +48,7 @@ def species_key(row: Row) -> Optional[str]:
 
 
 @dataclass
-class MSA:
+class Alignment:
     """An alignment for one protein chain.
 
     rows: unpaired alignment rows, query first.
@@ -103,7 +103,7 @@ class MSA:
         if self.derived:
             extra = f", derived from {self.derived['parent_seq_sha256'][:12]} ({self.derived['identity']:.3f} identity)"
         return (
-            f"MSA(source={self.source!r}, length={len(self.query)}, depth={self.depth}, "
+            f"Alignment(source={self.source!r}, length={len(self.query)}, depth={self.depth}, "
             f"seq_sha256={self.seq_sha256[:12]}...{extra})"
         )
 
@@ -191,7 +191,7 @@ class MSA:
         return gzip.compress(text.encode("utf-8"), 6, mtime=0)
 
     @classmethod
-    def from_bundle(cls, data: bytes, source: str, query: Optional[str] = None) -> "MSA":
+    def from_bundle(cls, data: bytes, source: str, query: Optional[str] = None) -> "Alignment":
         try:
             text = gzip.decompress(data).decode("utf-8")
         except (OSError, EOFError, UnicodeDecodeError) as e:
@@ -224,7 +224,7 @@ class MSA:
         query: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
         provenance: Optional[Dict[str, Any]] = None,
-    ) -> "MSA":
+    ) -> "Alignment":
         meta = meta or {}
         rows = parse_a3m(text, query, db="auto")
         n_uni = int(meta.get("n_uniprot") or 0)

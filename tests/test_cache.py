@@ -8,11 +8,11 @@ import pytest
 from conftest import Q_LIVE, key
 from scigantic_msa.a3m import Row
 from scigantic_msa.cache import AlignmentCache, FileLock, atomic_write
-from scigantic_msa.msa import MSA
+from scigantic_msa.alignment import Alignment
 
 
 def msa(q=Q_LIVE):
-    return MSA(query=q, rows=[Row("101", q, "query"), Row("h", q, "uniref", "1")], source="remote",
+    return Alignment(query=q, rows=[Row("101", q, "query"), Row("h", q, "uniref", "1")], source="remote",
                provenance={"backend": "colabfold"})
 
 

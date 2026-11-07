@@ -24,7 +24,7 @@ from .a3m import A3MError
 from .assemble import EntryUnusable, load_entry, order_entries
 from .cache import AlignmentCache
 from .index import Index, IndexIntegrityError, IndexUnavailable
-from .msa import MSA
+from .alignment import Alignment
 from .near import find_near, remap_rows
 from .pairing import Pairing, pair_by_species
 from .remote import BACKENDS, announce, make_backend, remote_disabled
@@ -99,7 +99,7 @@ def _resolve(
     near_method: str,
     dry_run: bool,
     quiet: bool,
-) -> "tuple[Optional[MSA], List[Step]]":
+) -> "tuple[Optional[Alignment], List[Step]]":
     q = canonical_sequence(sequence)
     sha = seq_sha256(q)
     steps: List[Step] = []
@@ -174,7 +174,7 @@ def _resolve(
                 derived = h.describe()
                 derived["parent_source"] = ent.source
                 derived["parent_source_id"] = ent.source_id
-                msa = MSA(query=q, rows=rows, source="near", provenance=dict(pm.provenance), attribution=pm.attribution,
+                msa = Alignment(query=q, rows=rows, source="near", provenance=dict(pm.provenance), attribution=pm.attribution,
                           uniprot_rows=urows, derived=derived)
                 steps.append(Step("near", "hit", f"parent {ent.source} {ent.source_id}, {h.identity * 100:.1f}% identity"))
                 return msa, steps
@@ -209,7 +209,7 @@ def _resolve(
         except RemoteError as e:
             steps.append(Step("remote", "error", str(e)))
             return None, steps
-        msa = MSA(query=q, rows=res.rows, source="remote", provenance=dict(res.provenance), templates=res.templates,
+        msa = Alignment(query=q, rows=res.rows, source="remote", provenance=dict(res.provenance), templates=res.templates,
                   attribution=[_remote_attribution(backend)])
         if ac is not None:
             msa.cache_path = str(ac.put(msa, backend.name, backend.dbkey))
@@ -240,7 +240,7 @@ def get_msa(
     max_length_diff: int = 5,
     near_method: str = "auto",
     quiet: bool = False,
-) -> MSA:
+) -> Alignment:
     """Find or compute the MSA for one protein sequence.
 
     remote: None uses SCIGANTIC_MSA_REMOTE or the config (off by default);
@@ -286,7 +286,7 @@ def where(sequence: str, **kw: Any) -> List[Step]:
 class Complex:
     """MSAs for the chains of a complex, with pairing where the data allows."""
 
-    chains: List[MSA]
+    chains: List[Alignment]
     pairing: Pairing
     notes: List[str] = field(default_factory=list)
 
@@ -296,7 +296,7 @@ class Complex:
     def __len__(self) -> int:
         return len(self.chains)
 
-    def __getitem__(self, i: int) -> MSA:
+    def __getitem__(self, i: int) -> Alignment:
         return self.chains[i]
 
     def to_af3_json(self, path: Any = None, **kw: Any) -> dict:
@@ -333,7 +333,7 @@ def get_msas(sequences: Sequence[str], **kw: Any) -> Complex:
     """MSAs for every chain of a complex. Identical chains share one lookup.
     Rows are paired across chains by species only where the rows carry it;
     ``.pairing.message`` says what was possible."""
-    uniq: Dict[str, MSA] = {}
+    uniq: Dict[str, Alignment] = {}
     order: List[str] = []
     kw.setdefault("want_uniprot", len({canonical_sequence(s) for s in sequences}) > 1)
     for s in sequences:

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
 from .a3m import Row, ungapped
-from .msa import MSA, species_key
+from .alignment import Alignment, species_key
 
 __all__ = ["Pairing", "pair_by_species"]
 
@@ -36,7 +36,7 @@ class Pairing:
         return len(self.keys)
 
 
-def _pool(msa: MSA) -> List[Row]:
+def _pool(msa: Alignment) -> List[Row]:
     """Candidate rows for pairing. Rows with the same residues as the query or
     as an earlier row are left out: they add nothing, and Boltz and AlphaFold 3
     drop repeated rows, which would silently break the pair."""
@@ -52,7 +52,7 @@ def _pool(msa: MSA) -> List[Row]:
     return out
 
 
-def pair_by_species(msas: Sequence[MSA], max_pairs: Optional[int] = 8192) -> Pairing:
+def pair_by_species(msas: Sequence[Alignment], max_pairs: Optional[int] = 8192) -> Pairing:
     if len(msas) < 2:
         return Pairing([[] for _ in msas], [], [], "one chain: nothing to pair")
     best: List[Dict[str, tuple]] = []

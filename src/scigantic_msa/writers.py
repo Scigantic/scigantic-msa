@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .a3m import Row, format_a3m
-from .msa import MSA, dedupe_rows
+from .alignment import Alignment, dedupe_rows
 from .pairing import Pairing, pair_by_species
 from .seqkey import canonical_sequence
 
@@ -63,9 +63,9 @@ def _atomic_write(path: Path, data: "str | bytes") -> None:
         raise
 
 
-def entities(chains: Sequence[MSA]) -> List[Tuple[MSA, int, List[int]]]:
+def entities(chains: Sequence[Alignment]) -> List[Tuple[Alignment, int, List[int]]]:
     """Group chains with the same sequence: (msa, copies, chain indexes)."""
-    out: Dict[str, Tuple[MSA, List[int]]] = {}
+    out: Dict[str, Tuple[Alignment, List[int]]] = {}
     for i, m in enumerate(chains):
         if m.query in out:
             out[m.query][1].append(i)
@@ -74,13 +74,13 @@ def entities(chains: Sequence[MSA]) -> List[Tuple[MSA, int, List[int]]]:
     return [(m, len(idx), idx) for m, idx in out.values()]
 
 
-def _pairing(ents: Sequence[MSA], pairing: Optional[Pairing]) -> Pairing:
+def _pairing(ents: Sequence[Alignment], pairing: Optional[Pairing]) -> Pairing:
     if pairing is not None:
         return pairing
     return pair_by_species(ents)
 
 
-def _sidecar(directory: Path, chains: Sequence[MSA], notes: List[str], files: Dict[str, Any]) -> None:
+def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], files: Dict[str, Any]) -> None:
     data = {
         "written_by": "scigantic-msa",
         "chains": [
@@ -102,7 +102,7 @@ def _sidecar(directory: Path, chains: Sequence[MSA], notes: List[str], files: Di
     _atomic_write(directory / ATTRIBUTION_FILE, json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 
-def _unpaired_with_prepaired(m: MSA, paired: List[Row]) -> List[Row]:
+def _unpaired_with_prepaired(m: Alignment, paired: List[Row]) -> List[Row]:
     """Query, then the paired rows in order, then the remaining rows."""
     used = {id(r) for r in paired}
     rest = [r for r in m.rows[1:] if id(r) not in used]
@@ -112,7 +112,7 @@ def _unpaired_with_prepaired(m: MSA, paired: List[Row]) -> List[Row]:
 # --------------------------------------------------------------------------- A3M
 
 
-def write_a3m(msa: MSA, path: "str | Path | None" = None, *, max_rows: Optional[int] = None) -> str:
+def write_a3m(msa: Alignment, path: "str | Path | None" = None, *, max_rows: Optional[int] = None) -> str:
     text = msa.a3m(max_rows=max_rows)
     if path is not None:
         p = Path(path)
@@ -124,7 +124,7 @@ def write_a3m(msa: MSA, path: "str | Path | None" = None, *, max_rows: Optional[
 # --------------------------------------------------------------------------- ColabFold
 
 
-def write_colabfold(chains: Sequence[MSA], path: "str | Path", *, pairing: Optional[Pairing] = None) -> Path:
+def write_colabfold(chains: Sequence[Alignment], path: "str | Path", *, pairing: Optional[Pairing] = None) -> Path:
     """One A3M for ``colabfold_batch``. A monomer is a plain A3M; a
     homo-oligomer gets ``#<len>\\t<copies>``; a complex gets the ColabFold
     complex layout with species-paired rows first (positional pairing) and
@@ -168,7 +168,7 @@ def write_colabfold(chains: Sequence[MSA], path: "str | Path", *, pairing: Optio
 
 
 def write_af3_json(
-    chains: Sequence[MSA],
+    chains: Sequence[Alignment],
     path: "str | Path | None" = None,
     *,
     input: "dict | str | Path | None" = None,  # noqa: A002 - matches AF3 wording
@@ -308,7 +308,7 @@ def _chain_ids():
 # --------------------------------------------------------------------------- Boltz
 
 
-def write_boltz(chains: Sequence[MSA], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[str]:
+def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[str]:
     """Write Boltz MSA files and return one YAML ``msa:`` line per chain.
 
     A single distinct sequence gets ``<seq_sha256>.a3m``. Several get
@@ -364,7 +364,7 @@ def chai_expected_basename(sequence: str) -> str:
     return hashlib.sha256(sequence.upper().encode()).hexdigest() + ".aligned.pqt"
 
 
-def write_chai(chains: Sequence[MSA], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[Path]:
+def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[Path]:
     """Write ``<seq_sha256>.aligned.pqt`` per distinct sequence, the file
     Chai-1 looks up in ``--msa-directory``. Needs pyarrow
     (``pip install 'scigantic-msa[chai]'``)."""
@@ -421,7 +421,7 @@ def write_chai(chains: Sequence[MSA], directory: "str | Path", *, pairing: Optio
 # --------------------------------------------------------------------------- OpenFold3
 
 
-def write_openfold3(chains: Sequence[MSA], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[dict]:
+def write_openfold3(chains: Sequence[Alignment], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[dict]:
     """Write OpenFold3 MSA directories and return, per chain, the fields to
     put in that chain of the query JSON.
 

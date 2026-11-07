@@ -6,7 +6,7 @@ import pytest
 from conftest import Q_1HVW, Q_1PXQ, Q_6T33, Q_7M22A, Q_7M22C, Q_LITEFOLD, REAL, key
 from scigantic_msa.a3m import Row, match_length, parse_a3m, parse_colabfold_complex
 from scigantic_msa.assemble import load_entry
-from scigantic_msa.msa import MSA
+from scigantic_msa.alignment import Alignment
 from scigantic_msa.pairing import pair_by_species
 from scigantic_msa.writers import (
     ATTRIBUTION_FILE, chai_expected_basename, write_af3_json, write_boltz, write_chai, write_colabfold, write_openfold3,
@@ -25,7 +25,7 @@ def msas(index_setup):
 
 def synthetic(query, hits, taxids=None):
     rows = [Row("q", query, "query")] + [Row(f"h{i} x", s, "uniref", (taxids or {}).get(i)) for i, s in enumerate(hits)]
-    return MSA(query=query, rows=rows, source="remote", provenance={"backend": "colabfold"})
+    return Alignment(query=query, rows=rows, source="remote", provenance={"backend": "colabfold"})
 
 
 def test_a3m_and_sidecar(msas, tmp_path):
@@ -205,7 +205,7 @@ def test_real_heterodimer_pairs_by_species(msas):
     pr = pair_by_species([a, b])
     # 10 species are shared; 2 of those rows are identical to the query and are left out.
     assert pr.n_paired == 8
-    from scigantic_msa.msa import species_key
+    from scigantic_msa.alignment import species_key
 
     for ra, rb in zip(*pr.rows):
         assert species_key(ra) == species_key(rb) is not None
@@ -213,7 +213,7 @@ def test_real_heterodimer_pairs_by_species(msas):
 
 
 def test_uniref90_cluster_taxids_are_not_species():
-    from scigantic_msa.msa import species_key
+    from scigantic_msa.alignment import species_key
 
     assert species_key(Row("UniRef90_X n=9 Tax=Firmicutes TaxID=1239", "M")) is None
     assert species_key(Row("UniRef90_X n=1 Tax=Homo TaxID=9606", "M")) == "tx:9606"

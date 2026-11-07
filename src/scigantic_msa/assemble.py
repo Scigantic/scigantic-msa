@@ -23,7 +23,7 @@ from typing import Iterable, Iterator, List, Optional, Sequence
 from . import http
 from .a3m import A3MError, Row, parse_a3m, parse_stockholm
 from .index import FileRef, Index, IndexEntry, IndexIntegrityError, IndexUnavailable
-from .msa import MSA, dedupe_rows
+from .alignment import Alignment, dedupe_rows
 
 log = logging.getLogger("scigantic_msa")
 
@@ -201,7 +201,7 @@ def load_entry(
     *,
     purpose: str = "a3m",
     want_uniprot: bool = False,
-) -> MSA:
+) -> Alignment:
     roles = {f.role: f for f in entry.files}
     try:
         if purpose == "af3" and "cfdb_uniref30" in roles:
@@ -230,7 +230,7 @@ def load_entry(
         raise EntryUnusable(f"{entry.source} {entry.source_id}: {e}") from None
     except (IndexUnavailable, IndexIntegrityError, http.HTTPError) as e:
         raise EntryUnusable(f"{entry.source} {entry.source_id}: {e}") from None
-    # UniProt rows only help pairing; a problem there must not lose the MSA.
+    # UniProt rows only help pairing; a problem there must not lose the Alignment.
     uniprot_rows = None
     uniprot_error = None
     if want_uniprot and "uniprot" in roles:
@@ -252,5 +252,5 @@ def load_entry(
     }
     if uniprot_error:
         prov["uniprot_error"] = uniprot_error
-    return MSA(query=query, rows=rows, source="exact", provenance=prov, attribution=attribution,
+    return Alignment(query=query, rows=rows, source="exact", provenance=prov, attribution=attribution,
                uniprot_rows=uniprot_rows)
