@@ -427,3 +427,19 @@ def test_af3_merge_lowercase_sequence_matches_the_msa_query():
     assert p["sequence"] == Q_6T33
     assert p["sequence"] == p["unpairedMsa"].split("\n")[1]
     assert inp["sequences"][0]["protein"]["sequence"] == Q_6T33.lower()  # the caller's dict is not changed
+
+
+@pytest.mark.parametrize("ent, msg", [
+    ("proteinChain", "must be an object.*not str"),
+    ([{"proteinChain": {}}], "must be an object.*not list"),
+    ({"proteinChain": "MKV"}, "proteinChain must be an object, not str"),
+])
+def test_protenix_check_rejects_a_sequences_entry_that_is_not_an_object(ent, msg):
+    with pytest.raises(PrepareError, match=msg):
+        Protenix.check([{"name": "x", "sequences": [ent]}])
+
+
+def test_protenix_check_skips_entries_that_are_not_protein(tmp_path):
+    jobs = Protenix.prepare(real_alignment(Q_6T33), out_dir=tmp_path)
+    jobs[0]["sequences"].append({"ligand": {"ligand": "CCD_ATP", "count": 1}})
+    Protenix.check(jobs)

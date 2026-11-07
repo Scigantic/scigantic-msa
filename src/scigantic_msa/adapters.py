@@ -510,8 +510,15 @@ class Protenix:
                 problems.append(f"job {j}: no 'sequences' list")
                 continue
             for e, ent in enumerate(seqs, 1):
-                pc = ent.get("proteinChain") if isinstance(ent, dict) else None
+                if not isinstance(ent, dict):
+                    problems.append(f"job {j} entity {e}: each sequences entry must be an object, "
+                                    f"such as {{\"proteinChain\": {{...}}}}, not {type(ent).__name__}")
+                    continue
+                pc = ent.get("proteinChain")
+                if pc is None:
+                    continue
                 if not isinstance(pc, dict):
+                    problems.append(f"job {j} entity {e}: proteinChain must be an object, not {type(pc).__name__}")
                     continue
                 problems += _check_protenix_chain(pc, f"job {j} entity {e}")
         if problems:
