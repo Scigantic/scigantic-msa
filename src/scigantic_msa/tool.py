@@ -189,7 +189,8 @@ def protein_sequence(seq: str, i: int) -> str:
 def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None) -> Alignment:
     name = None
     data: Union[str, bytes]
-    if isinstance(a3m, os.PathLike) or (isinstance(a3m, str) and "\n" not in a3m and not a3m.lstrip().startswith(">")):
+    if isinstance(a3m, os.PathLike) or (isinstance(a3m, str) and "\n" not in a3m and "\r" not in a3m
+                                      and not a3m.lstrip("\ufeff \t").startswith(">")):
         p = Path(a3m)
         if not p.is_file():
             # A str reaches here when it has no newline and does not start
@@ -225,9 +226,17 @@ def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] 
     else:
         data = a3m
     what = name or "a3m"
+    if isinstance(data, bytes) and data.startswith(b"\xef\xbb\xbf"):
+        data = data[3:]
+    elif isinstance(data, str):
+        data = data.lstrip("\ufeff")
     head = data[:20] if isinstance(data, bytes) else data[:20].encode()
     if head.lstrip().startswith(b"# STOCKHOLM"):
-        text = data.decode("utf-8") if isinstance(data, bytes) else data
+        try:
+            text = data.decode("utf-8") if isinstance(data, bytes) else data
+        except UnicodeDecodeError as e:
+            raise A3MError(f"{what}: not UTF-8 text ({e})") from None
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         rows = parse_stockholm(text.split("\n"), sequence, what=what)
     else:
         rows = parse_a3m(data, sequence, what=what)

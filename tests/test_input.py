@@ -207,3 +207,52 @@ def test_ctrl_c_says_rerun_resumes(fake, tmp_path, capsys):
     fake.search = stop
     assert run(Q, "-m", "af3", "-o", str(tmp_path / "o"), "--yes") == 130
     assert "run the same command again" in capsys.readouterr().err
+
+
+# Defect 7: a byte order mark, CR-only line endings and an HH-suite '#A3M#'
+# first line are valid input.
+BOM = b"\xef\xbb\xbf"
+STO = f"# STOCKHOLM 1.0\n101 {Q}\nhit {HIT}\n//\n"
+
+
+@pytest.mark.parametrize("body", [
+    BOM + A3M.encode(),
+    A3M.replace("\n", "\r").encode(),
+    BOM + A3M.replace("\n", "\r\n").encode(),
+    b"#A3M#\n" + A3M.encode(),
+    BOM + b"#A3M#\r" + A3M.replace("\n", "\r").encode(),
+], ids=["bom", "cr", "bom-crlf", "hhsuite-tag", "all"])
+def test_odd_but_valid_a3m(tmp_path, body):
+    p = tmp_path / "x.a3m"
+    p.write_bytes(body)
+    assert MSA().from_a3m(p).depth == 2
+    assert MSA().from_a3m(body.decode("utf-8")).depth == 2
+    assert len(parse_a3m(body)) == 2
+
+
+@pytest.mark.parametrize("body", [BOM + STO.encode(), STO.replace("\n", "\r").encode()], ids=["bom", "cr"])
+def test_odd_but_valid_stockholm(tmp_path, body):
+    p = tmp_path / "x.sto"
+    p.write_bytes(body)
+    assert MSA().from_a3m(p).depth == 2
+
+
+def test_hhsuite_tag_only_first(tmp_path):
+    from scigantic_msa.a3m import A3MError
+    with pytest.raises(A3MError, match="not a ColabFold header"):
+        parse_a3m(A3M + "#A3M#\n")
+
+
+@pytest.mark.parametrize("body", [BOM + f">q\n{Q}\n".encode(), f">q\r{Q[:40]}\r{Q[40:]}\r".encode()],
+                         ids=["bom", "cr"])
+def test_odd_but_valid_fasta(fake, tmp_path, body):
+    p = tmp_path / "x.fasta"
+    p.write_bytes(body)
+    assert run(str(p), "-m", "af3", "-o", str(tmp_path / "o"), "--yes") == 0
+    assert fake.calls == [Q]
+
+
+def test_bom_on_stdin(fake, tmp_path, monkeypatch):
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"﻿>q\n{Q}\n"))
+    assert run("-", "-m", "af3", "-o", str(tmp_path / "o"), "--yes") == 0
+    assert fake.calls == [Q]

@@ -100,6 +100,9 @@ def _records(text: str, *, skip_comments: bool, what: str) -> Iterator[Tuple[str
         if not line.strip():
             continue
         if line.startswith("#"):
+            if not seen and line.strip() == "#A3M#":
+                # HH-suite (hhblits -oa3m with some options) writes this tag first.
+                continue
             m = _CF_HEADER.match(line)
             if m and not seen:
                 seen = True
@@ -129,6 +132,12 @@ def _records(text: str, *, skip_comments: bool, what: str) -> Iterator[Tuple[str
         yield (name, "".join(parts))
 
 
+def _normalise(text: str) -> str:
+    """Drop NUL bytes and a leading byte order mark; turn CR LF and lone CR
+    line endings into LF."""
+    return text.replace("\x00", "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _is_consensus(header: str) -> bool:
     first = header.lstrip(">").split()
     return bool(first) and first[0].endswith("_consensus")
@@ -153,7 +162,7 @@ def parse_a3m(
             text = bytes(text).decode("utf-8")
         except UnicodeDecodeError as e:
             raise A3MError(f"{what}: not UTF-8 text ({e})") from None
-    text = text.replace("\x00", "")
+    text = _normalise(text)
     rows: List[Row] = []
     declared_len: Optional[int] = None
     qrow: Optional[str] = None
@@ -264,6 +273,7 @@ def parse_stockholm(
         line = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else raw
         line = line.rstrip("\r\n")
         if not started:
+            line = line.lstrip("\ufeff")
             if not line.strip():
                 continue
             if not line.startswith("# STOCKHOLM"):
@@ -336,8 +346,8 @@ def parse_colabfold_complex(text: str) -> Tuple[List[int], List[int], List[str],
     """Read a ColabFold complex A3M. Returns (lengths, cardinalities, query
     sequences per chain, records) where records are (header, row) pairs of the
     full concatenated width."""
-    text = text.replace("\x00", "")
-    lines = [l.rstrip("\r") for l in text.split("\n")]
+    text = _normalise(text)
+    lines = text.split("\n")
     while lines and not lines[0].strip():
         lines.pop(0)
     if not lines:
