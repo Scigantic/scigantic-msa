@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -211,12 +212,27 @@ def test_protenix_complex_headers_carry_the_species_protenix_reads(taxid_dimer, 
     assert PROTENIX_UNIREF.match("UniRef100_H0_9606/").group(1) == "9606"
 
 
-def test_protenix_keeps_uniprot_headers_it_can_read(dimer, tmp_path):
+def test_protenix_uniprot_rows_with_ox_get_the_taxid(dimer, tmp_path):
+    # The real UniProt hits carry OX=<taxid>; the library pairs on that, so
+    # Protenix must read the same taxid, not the mnemonic.
     jobs = Protenix.prepare(list(dimer), out_dir=tmp_path, quiet=True)
     for s, m in zip(jobs[0]["sequences"], dimer):
         rows = parse_a3m(Path(s["proteinChain"]["pairedMsaPath"]).read_text(), m.query)
         assert len(rows) > 1
-        assert all(PROTENIX_UNIPROT.match(r.header) for r in rows[1:])
+        ox = {r.header.split("|")[1]: re.search(r"OX=(\d+)", r.header).group(1) for r in m.uniprot_rows[1:]}
+        for r in rows[1:]:
+            acc = r.header[len("UniRef100_"):].split("_")[0]
+            assert PROTENIX_UNIREF.match(r.header) and protenix_species(r.header) == ox[acc]
+        assert rows[1].header.startswith("UniRef100_") and "|" not in rows[1].header
+
+
+def test_protenix_keeps_uniprot_headers_without_a_taxid(tmp_path):
+    a = synthetic("MKVLAG", ["MRVLAG"], headers={0: "tr|Q9XYZ1|Q9XYZ1_FUNHE/3-8"})
+    b = synthetic("GHSEQK", ["GHTEQK"], headers={0: "sp|Q8ABC1|ABC_FUNHE"})
+    jobs = Protenix.prepare([a, b], out_dir=tmp_path, quiet=True)
+    ra, rb = _paired_species(jobs, (a, b))
+    assert [r.header for r in ra] == ["tr|Q9XYZ1|Q9XYZ1_FUNHE/3-8"]
+    assert [r.header for r in rb] == ["sp|Q8ABC1|ABC_FUNHE"]
 
 
 def test_protenix_no_pairing_file_when_chains_share_no_species(tmp_path, capsys):
@@ -338,3 +354,92 @@ def test_protenix_prepare_checks_its_own_output(tmp_path, monkeypatch):
     monkeypatch.setattr(Alignment, "a3m", lambda self, max_rows=None: "")
     with pytest.raises(PrepareError, match="non_pairing.a3m is empty"):
         Protenix.prepare(m, out_dir=tmp_path)
+
+
+# --------------------------------------------------------------------------- Protenix pairs on the library's taxid
+
+
+def _paired_species(jobs, chains):
+    out = []
+    for s, m in zip(jobs[0]["sequences"], chains):
+        rows = parse_a3m(Path(s["proteinChain"]["pairedMsaPath"]).read_text(), m.query)
+        out.append(rows[1:])
+    return out
+
+
+def test_protenix_pairing_headers_carry_the_taxid(tmp_path):
+    # A full UniRef header ends in RepID=<acc>_<code>; Protenix would read the
+    # code (9BETA, shared by many species) instead of the TaxID.
+    qa, qb = "MKVLAAGIVA", "GHSTWQERLL"
+    a = MSA().from_a3m(f">q\n{qa}\n"
+                       f">UniRef100_P1 x n=1 Tax=Sp one TaxID=111 RepID=P1_9BETA\nMKVLAAGIVG\n"
+                       f">UniRef100_P2 x n=1 Tax=Sp two TaxID=222 RepID=P2_9BETA\nMKVLSAGIVA\n")
+    b = MSA().from_a3m(f">q\n{qb}\n"
+                       f">UniRef100_P3 x n=1 Tax=Sp two TaxID=222 RepID=P3_9BETA\nGHSTWQERLI\n"
+                       f">UniRef100_P4 x n=1 Tax=Sp three TaxID=333 RepID=P4_9BETA\nGHSTWAERLL\n")
+    jobs = Protenix.prepare([a, b], out_dir=tmp_path, quiet=True)
+    ra, rb = _paired_species(jobs, (a, b))
+    assert [protenix_species(r.header) for r in ra] == ["111", "222"]
+    assert [protenix_species(r.header) for r in rb] == ["222", "333"]
+    assert [r.header for r in ra] == ["UniRef100_P1_111/", "UniRef100_P2_222/"]
+
+
+def test_protenix_species_equals_the_taxid_the_library_paired_on(tmp_path):
+    # Every kind of header a row with a taxid can carry: a ColabFold accession
+    # with a taxid from uniref_tax.tsv, a full UniRef header, a UniProt header
+    # with OX= whose mnemonic is not the species, and accessions with _ or /.
+    from scigantic_msa.alignment import species_key
+
+    a = synthetic("MKVLAG", ["MRVLAG", "MKILAG", "MKVAAG", "MKVLGG", "MKVLAW"],
+                  taxids={0: "9606"},
+                  headers={1: "UniRef100_A0A_B1 desc n=1 TaxID=10090 RepID=A0A_B1_9MURI",
+                           2: "tr|Q9XYZ1|Q9XYZ1_9BETA desc OX=7227 GN=x",
+                           3: "UniRef100_P5/2-40 n=1 TaxID=4932",
+                           4: "tr|Q8ABC9|Q8ABC9_HUMAN no taxid here"})
+    b = synthetic("GHSEQK", ["GHTEQK", "GASEQK", "GHSEAK", "GHSEQW", "GHSWQK"],
+                  taxids={1: "9606"},
+                  headers={0: "sp|P12345|ABC_9BETA OX=10090",
+                           2: "UniRef100_X9 n=1 TaxID=7227 RepID=X9_9BETA",
+                           3: "UniRef100_Y1/3-9 n=1 TaxID=4932",
+                           4: "tr|Q1ABC2|Q1ABC2_HUMAN"})
+    pr = pair_by_species([a, b])
+    assert pr.n_paired == 5
+    jobs = Protenix.prepare([a, b], out_dir=tmp_path, quiet=True)
+    for rows, m in zip(_paired_species(jobs, (a, b)), (a, b)):
+        by_seq = {r.seq: r for r in m.rows}
+        for r in rows:
+            key = species_key(by_seq[r.seq])
+            assert protenix_species(r.header) == key[3:], (r.header, key)
+    # The pairing Protenix will do matches the library's: the same species in both chains.
+    ra, rb = _paired_species(jobs, (a, b))
+    assert {protenix_species(r.header) for r in ra} == {protenix_species(r.header) for r in rb}
+
+
+# --------------------------------------------------------------------------- AF3 merge
+
+
+def test_af3_merge_lowercase_sequence_matches_the_msa_query():
+    m = real_alignment(Q_6T33)
+    inp = {"dialect": "alphafold3", "version": 2, "name": "x", "modelSeeds": [1],
+           "sequences": [{"protein": {"id": "A", "sequence": Q_6T33.lower()}}]}
+    doc = AlphaFold3.prepare(m, input=inp)
+    p = doc["sequences"][0]["protein"]
+    assert p["sequence"] == Q_6T33
+    assert p["sequence"] == p["unpairedMsa"].split("\n")[1]
+    assert inp["sequences"][0]["protein"]["sequence"] == Q_6T33.lower()  # the caller's dict is not changed
+
+
+@pytest.mark.parametrize("ent, msg", [
+    ("proteinChain", "must be an object.*not str"),
+    ([{"proteinChain": {}}], "must be an object.*not list"),
+    ({"proteinChain": "MKV"}, "proteinChain must be an object, not str"),
+])
+def test_protenix_check_rejects_a_sequences_entry_that_is_not_an_object(ent, msg):
+    with pytest.raises(PrepareError, match=msg):
+        Protenix.check([{"name": "x", "sequences": [ent]}])
+
+
+def test_protenix_check_skips_entries_that_are_not_protein(tmp_path):
+    jobs = Protenix.prepare(real_alignment(Q_6T33), out_dir=tmp_path)
+    jobs[0]["sequences"].append({"ligand": {"ligand": "CCD_ATP", "count": 1}})
+    Protenix.check(jobs)

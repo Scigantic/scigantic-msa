@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .a3m import A3MError, parse_a3m, parse_stockholm
-from .alignment import Alignment
+from .alignment import _UNIPROT, Alignment
 from .cache import AlignmentCache, LockTimeout
 from .remote import BACKENDS, announce, make_backend, remote_disabled
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
@@ -189,7 +189,8 @@ class MSA:
                 lock.release()
 
     # ------------------------------------------------------------ files
-    def from_a3m(self, a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None) -> Alignment:
+    def from_a3m(self, a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None, *,
+                 uniprot: Union[str, bytes, os.PathLike, None] = None) -> Alignment:
         """Read an alignment you already have: a path to an ``.a3m`` (or
         ``.a3m.gz``, or Stockholm ``.sto``) file, or the A3M text itself.
         Nothing is sent anywhere.
@@ -197,8 +198,14 @@ class MSA:
         With ``sequence``, the first record must be exactly that sequence.
         The whole file is checked: allowed characters only, every row as
         wide as the query, and no complex header (pass one file per chain).
+
+        ``uniprot`` is an optional second alignment of the same chain against
+        UniProt (such as AlphaFold 3's or OpenFold3's ``uniprot_hits``), with
+        headers like ``tr|ACC|NAME_SPECIES``. Its rows are used to pair the
+        chains of a complex: AlphaFold 3 gets them as ``pairedMsa``,
+        OpenFold3 as ``uniprot_hits.a3m`` and Protenix as ``pairing.a3m``.
         """
-        return read_alignment(a3m, sequence)
+        return read_alignment(a3m, sequence, uniprot=uniprot)
 
     def _say(self, msg: str) -> None:
         log.info(msg)
@@ -240,7 +247,8 @@ def protein_sequence(seq: str, i: int) -> str:
     return q
 
 
-def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None) -> Alignment:
+def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None, *,
+                   uniprot: Union[str, bytes, os.PathLike, None] = None) -> Alignment:
     name = None
     data: Union[str, bytes]
     if isinstance(a3m, os.PathLike) or (isinstance(a3m, str) and "\n" not in a3m and "\r" not in a3m
@@ -297,7 +305,29 @@ def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] 
     prov = {"from": "file"}
     if name:
         prov["file"] = name
-    return Alignment(query=rows[0].seq, rows=rows, source="file", provenance=prov)
+    uniprot_rows = None
+    if uniprot is not None:
+        uniprot_rows, uni_name = _uniprot_rows(uniprot, rows[0].seq, what)
+        if uni_name:
+            prov["uniprot_file"] = uni_name
+    return Alignment(query=rows[0].seq, rows=rows, source="file", provenance=prov, uniprot_rows=uniprot_rows)
+
+
+def _uniprot_rows(uniprot: Union[str, bytes, os.PathLike], query: str, what: str) -> "tuple[list, Optional[str]]":
+    """The rows of a UniProt alignment for the chain whose query is
+    ``query``, marked as UniProt rows. At least one row must carry a UniProt
+    species code in its header, the only species AlphaFold 3 pairs on."""
+    try:
+        uni = read_alignment(uniprot, query)
+    except A3MError as e:
+        raise A3MError(f"UniProt alignment for {what}: {e}") from None
+    if not any(_UNIPROT.match(r.header.split(None, 1)[0].partition("/")[0]) for r in uni.rows[1:] if r.header.strip()):
+        where = uni.provenance.get("file") or "the UniProt alignment"
+        raise A3MError(f"{where} has no row with a UniProt header such as tr|ACC|NAME_SPECIES, "
+                       "so no model could pair on it")
+    for r in uni.rows[1:]:
+        r.db = "uniprot"
+    return uni.rows, uni.provenance.get("file")
 
 
 def _attribution(backend: Any) -> Dict[str, Any]:

@@ -395,9 +395,12 @@ def protenix_species(header: str) -> str:
 
 def _protenix_pairing_rows(m: Alignment) -> List[Row]:
     """Query, then the rows with a species, with headers Protenix can read.
-    A header Protenix already reads a species from is kept. Otherwise a row
-    with a taxid becomes ``UniRef100_<acc>_<taxid>/``, as Protenix's own
-    ColabFold post-processing writes it."""
+    A row with a taxid always becomes ``UniRef100_<acc>_<taxid>/``, as
+    Protenix's own ColabFold post-processing writes it, so Protenix pairs on
+    the same taxid as the library. A full UniRef header would otherwise give
+    Protenix the RepID suffix (``P12345_9BETA`` reads as ``9BETA``, a code
+    many species share). A row with only a UniProt species code keeps its
+    header when Protenix reads that code from it."""
     src = m.uniprot_rows if m.uniprot_rows and len(m.uniprot_rows) > 1 else m.rows
     out = [Row("query", m.query, "query")]
     seen = {m.query}
@@ -408,14 +411,8 @@ def _protenix_pairing_rows(m: Alignment) -> List[Row]:
         resid = r.seq.replace("-", "").upper()
         if resid in seen:
             continue
-        if protenix_species(r.header):
-            header = r.header
-        elif k.startswith("tx:"):
-            acc = r.header.split(None, 1)[0] if r.header.strip() else "hit"
-            if acc.startswith("UniRef100_"):
-                acc = acc[len("UniRef100_"):]
-            acc = re.sub(r"[_/\s]", "-", acc) or "hit"
-            header = f"UniRef100_{acc}_{k[3:]}/"
+        if k.startswith("tx:"):
+            header = f"UniRef100_{_protenix_accession(r.header)}_{k[3:]}/"
         else:
             header = r.header
         if not protenix_species(header):
@@ -423,6 +420,22 @@ def _protenix_pairing_rows(m: Alignment) -> List[Row]:
         seen.add(resid)
         out.append(Row(header, r.seq, r.db, r.taxid))
     return out
+
+
+def _protenix_accession(header: str) -> str:
+    """An accession for a ``UniRef100_<acc>_<taxid>/`` header: the first word
+    without a ``UniRef100_`` / ``UniRef90_`` prefix, or the accession of a
+    ``tr|ACC|NAME`` header, with ``_``, ``/`` and ``|`` replaced so Protenix
+    reads the taxid and not part of the accession."""
+    acc = header.split(None, 1)[0] if header.strip() else ""
+    m = re.match(r"(?:tr|sp)\|([^|]+)\|", acc)
+    if m:
+        acc = m.group(1)
+    for prefix in ("UniRef100_", "UniRef90_", "UniRef50_"):
+        if acc.startswith(prefix):
+            acc = acc[len(prefix):]
+            break
+    return re.sub(r"[_/|]", "-", acc) or "hit"
 
 
 class Protenix:
@@ -501,8 +514,15 @@ class Protenix:
                 problems.append(f"job {j}: no 'sequences' list")
                 continue
             for e, ent in enumerate(seqs, 1):
-                pc = ent.get("proteinChain") if isinstance(ent, dict) else None
+                if not isinstance(ent, dict):
+                    problems.append(f"job {j} entity {e}: each sequences entry must be an object, "
+                                    f"such as {{\"proteinChain\": {{...}}}}, not {type(ent).__name__}")
+                    continue
+                pc = ent.get("proteinChain")
+                if pc is None:
+                    continue
                 if not isinstance(pc, dict):
+                    problems.append(f"job {j} entity {e}: proteinChain must be an object, not {type(pc).__name__}")
                     continue
                 problems += _check_protenix_chain(pc, f"job {j} entity {e}")
         if problems:

@@ -58,7 +58,9 @@ scigantic-msa version
 
 `--model` is one of `af3`, `boltz`, `chai`, `colabfold`, `openfold3`,
 `protenix`. `convert` takes one A3M (or `.a3m.gz`, or Stockholm `.sto`) per
-chain, in chain order.
+chain, in chain order. For a complex, `--uniprot FILE` (once per chain, in
+the same order) adds an alignment of that chain against UniProt, such as
+AlphaFold 3's or OpenFold3's `uniprot_hits`; see Complexes.
 
 The argument to `run` is a FASTA file, `-` for stdin, or the sequence
 itself. So that a mistyped file name is never sent as a protein, a typed
@@ -74,7 +76,8 @@ with several records needs one of:
 - `--complex`: the records are one complex, one chain per record (at most
   20 chains).
 - `--batch`: each record is its own job, written to its own folder under
-  `--out` and named after the record (at most 100 jobs).
+  `--out` and named after the record, such as `jobs/rec1/boltz/` (at most
+  100 jobs).
 
 Before sending, `run` says how many sequences go to which server, and for
 a complex or batch, how many chains or jobs. After writing, `run` and
@@ -173,6 +176,7 @@ With an alignment you already have, and no network:
 
 ```python
 result = MSA().from_a3m("my_alignment.a3m", sequence=sequence)
+result = MSA().from_a3m("chainA.a3m", uniprot="chainA_uniprot_hits.sto")  # for pairing
 ```
 
 ## Checks
@@ -200,12 +204,20 @@ shared by all chains; the chains get unpaired MSAs".
 
 | model | how pairing is passed on |
 | --- | --- |
-| AlphaFold 3 | paired rows first in `unpairedMsa`; run with `--resolve_msa_overlaps=false` (UniProt rows go in `pairedMsa` instead, and AF3 pairs them) |
+| AlphaFold 3 | paired rows first in `unpairedMsa`; run with `--resolve_msa_overlaps=false` |
 | Boltz | one CSV per chain; paired rows share a key |
 | Chai-1 | `pairing_key` column |
 | ColabFold | the complex A3M layout, paired rows first |
 | OpenFold3 | `colabfold_paired.a3m` per chain |
-| Protenix | `pairing.a3m` per chain, with headers Protenix reads the species from; Protenix pairs them |
+| Protenix | `pairing.a3m` per chain, with the taxid (or UniProt species code) in each header so Protenix pairs on the same species |
+
+ColabFold server results carry taxids but no UniProt rows. If you have a
+UniProt alignment for every chain (`convert --uniprot`, or
+`from_a3m(..., uniprot=...)`), its rows are used for pairing instead:
+AlphaFold 3 gets them as `pairedMsa` and pairs them itself, OpenFold3 gets
+`uniprot_hits.a3m` in each chain's directory, Protenix's `pairing.a3m` is
+built from them, and the other models pair them by species as above. The
+file must have rows with UniProt headers (`tr|ACC|NAME_SPECIES`).
 
 ## Formats
 

@@ -252,6 +252,8 @@ def write_af3_json(
             continue
         m = found
         matched.add(q)
+        # AlphaFold 3 checks that the MSA's first row equals the sequence.
+        prot["sequence"] = q
         for k in ("unpairedMsa", "unpairedMsaPath", "pairedMsa", "pairedMsaPath"):
             prot.pop(k, None)
         up = format_a3m(unpaired_rows[q])

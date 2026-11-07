@@ -105,7 +105,7 @@ def test_complex_flag_makes_one_complex(fake, tmp_path, capsys):
     f = fasta(tmp_path, 3)
     assert run(str(f), "-m", "af3", "-o", str(tmp_path / "o"), "--yes", "--complex") == 0
     assert "One complex of 3 chains" in capsys.readouterr().err
-    doc = json.loads((tmp_path / "o" / "r0.json").read_text())
+    doc = json.loads((tmp_path / "o" / "af3" / "r0.json").read_text())
     assert len(doc["sequences"]) == 3
 
 
@@ -116,7 +116,7 @@ def test_batch_writes_one_folder_per_record(fake, tmp_path, capsys):
     err = capsys.readouterr().err
     assert "Batch of 3 separate jobs" in err
     for d in ("a", "b", "a_2"):
-        assert (tmp_path / "o" / d / f"{d}.yaml").is_file()
+        assert (tmp_path / "o" / d / "boltz" / f"{d}.yaml").is_file()
     assert sorted(map(len, fake.calls)) == sorted([len(Q), len(Q2), 30])
 
 
