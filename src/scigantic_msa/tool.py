@@ -120,7 +120,7 @@ class MSA:
         done: Dict[str, Alignment] = {}
         for i, q in enumerate(queries, 1):
             if q not in done:
-                done[q] = self._one(q, f"chain {i}" if not single else "sequence")
+                done[q] = self._one(q, f"chain {i}" if len(queries) > 1 else "sequence")
         out = [done[q] for q in queries]
         return out[0] if single else out
 
