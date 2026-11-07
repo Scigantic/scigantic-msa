@@ -1,3 +1,4 @@
+import gzip
 import io
 import json
 
@@ -137,3 +138,25 @@ def test_config_and_version(capsys):
 def test_index_info(env, capsys):
     assert main(["index", "info"]) == 0
     assert "test-build-1" in capsys.readouterr().out
+
+
+def test_push_a_gzipped_a3m(env, tmp_path, capsys):
+    fb = FakeBackend(env)
+    assert main(["login", "--email", "old@lab.edu", "--code", CODE]) == 0
+    f = tmp_path / "x.a3m.gz"
+    f.write_bytes(gzip.compress(f">q\n{Q_6T33}\n>h\n{Q_6T33[:-1]}A\n".encode()))
+    assert main(["push", str(f)]) == 0
+    assert "stored" in capsys.readouterr().out and len(fb.items) == 1
+    bad = tmp_path / "bad.a3m.gz"
+    bad.write_bytes(gzip.compress(b">q\nMKV\n")[:-6])
+    assert main(["push", str(bad)]) == 1
+    assert "gzip" in capsys.readouterr().err
+
+
+def test_commands_report_an_unreachable_api_without_a_traceback(capsys, monkeypatch):
+    monkeypatch.setenv("SCIGANTIC_MSA_TOKEN", "t")
+    assert main(["login", "--email", "a@lab.edu", "--code", "x"]) == 1
+    assert "could not reach" in capsys.readouterr().err
+    for args in (["list"], ["account"], ["pull", "abc"], ["rm", "abc"]):
+        assert main(args) == 1
+        assert "could not reach" in capsys.readouterr().err

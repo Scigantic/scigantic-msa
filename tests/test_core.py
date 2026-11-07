@@ -156,3 +156,76 @@ def test_homodimer_is_one_lookup(env):
     cx = get_msas([Q_6T33, Q_6T33])
     assert cx[0] is cx[1]
     assert cx.pairing.message.startswith("one chain")
+
+
+def test_signed_in_with_the_api_down_still_uses_the_index(env, monkeypatch):
+    monkeypatch.setenv("SCIGANTIC_MSA_TOKEN", "saved-token")
+    monkeypatch.setenv("SCIGANTIC_API_URL", "http://127.0.0.1:9")
+    m = get_msa(Q_6T33)
+    assert m.source == "exact"
+    steps = where(Q_6T33)
+    assert steps[1].name == "account" and steps[1].outcome == "error"
+
+
+def test_an_unreachable_remote_is_a_miss_not_a_crash(env, monkeypatch):
+    monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", "http://127.0.0.1:9")
+    with pytest.raises(MSANotFound) as e:
+        get_msa(Q_LIVE, remote="colabfold")
+    assert e.value.steps[-1].name == "remote" and e.value.steps[-1].outcome == "error"
+
+
+def test_near_parent_shard_unreachable_is_reported_not_raised(env):
+    mut = Q_LITEFOLD[:30] + ("W" if Q_LITEFOLD[30] != "W" else "Y") + Q_LITEFOLD[31:]
+    parent = key(Q_LITEFOLD)
+    assert key(mut)[:3] != parent[:3]
+    env.faults[f"/idx/v1/builds/test-build-1/shards/{parent[:3]}.jsonl.gz"] = [("status", 503, {}, b"")] * 10
+    with pytest.raises(MSANotFound) as e:
+        get_msa(mut)
+    near = [s for s in e.value.steps if s.name == "near"]
+    assert near and near[0].outcome == "error" and "not reachable" in near[0].detail
+
+
+def _creates(server):
+    return server.count(lambda r: r.method == "POST" and r.path_only == "/api/msa/alignments")
+
+
+def test_save_on_a_cache_hit_does_not_upload_the_same_alignment_again(env):
+    fb = FakeBackend(env)
+    c = AccountClient()
+    c.login_start("old@lab.edu")
+    c.login_finish("old@lab.edu", CODE)
+    FakeColabFold(env, ["COMPLETE"])
+    first = get_msa(Q_LIVE, remote="colabfold", save=True)
+    assert first.source == "remote" and _creates(env) == 1
+    again = get_msa(Q_LIVE, save=True)
+    assert again.source == "cache" and again.account_id == first.account_id
+    assert _creates(env) == 1
+    # Deleted from the account: the next save=True stores it again.
+    AccountClient().delete(first.account_id)
+    third = get_msa(Q_LIVE, save=True)
+    assert _creates(env) == 2 and third.account_id != first.account_id
+    assert len(fb.items) == 1
+
+
+def test_no_upload_without_save_and_only_hashes_reach_the_api(env):
+    FakeBackend(env)
+    c = AccountClient()
+    c.login_start("old@lab.edu")
+    c.login_finish("old@lab.edu", CODE)
+    FakeColabFold(env, ["COMPLETE"])
+    get_msa(Q_LIVE, remote="colabfold")
+    get_msa(Q_6T33)
+    get_msas([Q_7M22A, Q_7M22C])
+    assert _creates(env) == 0 and env.count(lambda r: r.method == "PUT") == 0
+    for r in env.requests:
+        if r.path.startswith("/api/"):
+            for q in (Q_LIVE, Q_6T33, Q_7M22A, Q_7M22C):
+                assert q.encode() not in r.body and q not in r.path
+
+
+def test_remote_false_talks_only_to_the_index(env):
+    seq = "MKVLAAGIVGLLLAACSPEQKTEEKKWWWWHHHHPPPP"
+    with pytest.raises(MSANotFound):
+        get_msa(seq, remote=False)
+    assert [r.path for r in env.requests if not r.path.startswith("/idx/")] == []
+    assert not any(seq.encode() in r.body or seq in r.path for r in env.requests)

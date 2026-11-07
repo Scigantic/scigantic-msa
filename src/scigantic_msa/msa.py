@@ -67,6 +67,8 @@ class MSA:
     derived: Optional[Dict[str, Any]] = None
     templates: Optional[Dict[str, Any]] = None
     account_id: Optional[str] = None
+    #: Local cache file this result was written to, if any.
+    cache_path: Optional[str] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.query = canonical_sequence(self.query)

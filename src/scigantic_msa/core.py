@@ -20,12 +20,13 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .a3m import A3MError
 from .account import AccountClient, AccountError, NotLoggedIn, load_config
 from .assemble import EntryUnusable, load_entry, order_entries
-from .cache import AlignmentCache
+from .cache import AlignmentCache, atomic_write
 from .index import Index, IndexIntegrityError, IndexUnavailable
 from .msa import MSA
 from .near import find_near, remap_rows
@@ -143,7 +144,7 @@ def _resolve(
                     else:
                         steps.append(Step("account", "hit", f"alignment {rec['alignmentId']}"))
                         if ac is not None:
-                            ac.put(msa, "account", rec["alignmentId"])
+                            msa.cache_path = str(ac.put(msa, "account", rec["alignmentId"]))
                         return msa, steps
                 else:
                     steps.append(Step("account", "miss", f"signed in via {acct.auth_method()}"))
@@ -194,7 +195,11 @@ def _resolve(
                                              f"({len(h.mismatches)} substitutions, {h.insertions + h.deletions} indels)"))
             return None, steps
         for h in hits:
-            parents = order_entries(idx.lookup(h.parent_seq_sha256), purpose)
+            try:
+                parents = order_entries(idx.lookup(h.parent_seq_sha256), purpose)
+            except IndexUnavailable as exc:
+                steps.append(Step("near", "error", f"index not reachable: {exc}"))
+                continue
             for ent in parents:
                 try:
                     pm = load_entry(idx, ent, h.parent_seq, purpose=purpose, want_uniprot=want_uniprot)
@@ -244,7 +249,7 @@ def _resolve(
         msa = MSA(query=q, rows=res.rows, source="remote", provenance=dict(res.provenance), templates=res.templates,
                   attribution=[_remote_attribution(backend)])
         if ac is not None:
-            ac.put(msa, backend.name, backend.dbkey)
+            msa.cache_path = str(ac.put(msa, backend.name, backend.dbkey))
         steps.append(Step("remote", "hit", f"{backend.server_name}, depth {msa.depth}"))
         return msa, steps
     finally:
@@ -314,10 +319,39 @@ def get_msa(
     _print(msa.summary(), quiet)
     if save and msa.source != "account":
         assert acct_obj is not None
-        aid = acct_obj.save(msa, label=label)
-        msa.account_id = aid
-        _print(f"saved to your Scigantic account as {aid} (private)", quiet)
+        prior = msa.provenance.get("account_alignment_id")
+        if prior and _still_stored(acct_obj, msa.seq_sha256, str(prior)):
+            # A cached copy of something already in the account: do not
+            # upload it again (each upload counts toward the per-sequence limit).
+            msa.account_id = str(prior)
+            _print(f"already in your Scigantic account as {prior} (private)", quiet)
+        else:
+            aid = acct_obj.save(msa, label=label)
+            msa.account_id = aid
+            _remember_saved(msa, aid)
+            _print(f"saved to your Scigantic account as {aid} (private)", quiet)
     return msa
+
+
+def _still_stored(acct: AccountClient, sha: str, alignment_id: str) -> bool:
+    try:
+        found = acct.lookup([sha]).get(sha) or []
+    except AccountError:
+        return False
+    return any(a.get("alignmentId") == alignment_id and a.get("status", "ready") == "ready" for a in found)
+
+
+def _remember_saved(msa: MSA, alignment_id: str) -> None:
+    """Note the account id in the cached copy, so a later cache hit with
+    save=True does not upload the same alignment again."""
+    path = msa.cache_path or msa.provenance.get("cache_file")
+    if not path:
+        return
+    msa.provenance["account_alignment_id"] = alignment_id
+    try:
+        atomic_write(Path(path), msa.to_bundle(), mode=0o600)
+    except OSError as e:
+        log.warning("could not update the cached copy %s: %s", path, e)
 
 
 def where(sequence: str, **kw: Any) -> List[Step]:

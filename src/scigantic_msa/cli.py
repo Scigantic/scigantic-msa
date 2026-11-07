@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import gzip
 import json
 import os
 import sys
@@ -309,8 +310,13 @@ def cmd_pull(a: argparse.Namespace) -> int:
 
 def cmd_push(a: argparse.Namespace) -> int:
     try:
-        text = Path(a.file).read_text()
-        msa = MSA.from_a3m(text, source="cache", query=a.seq, provenance={"from": "upload", "file": Path(a.file).name})
+        data = Path(a.file).read_bytes()
+        if data[:2] == b"\x1f\x8b":
+            try:
+                data = gzip.decompress(data)
+            except (OSError, EOFError) as e:
+                return die(f"{a.file}: not a readable gzip file ({e})")
+        msa = MSA.from_a3m(data, source="cache", query=a.seq, provenance={"from": "upload", "file": Path(a.file).name})
     except (OSError, A3MError, InvalidSequence) as e:
         return die(str(e))
     c = AccountClient(a.api_url)
