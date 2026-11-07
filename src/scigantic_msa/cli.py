@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import gzip
 import os
 import sys
 from pathlib import Path
@@ -52,14 +53,37 @@ def _read_text(arg: str) -> Tuple[str, bool]:
     """(text, typed): typed is True when the argument itself is the
     sequence and was not marked with a leading '='."""
     if arg == "-":
-        return sys.stdin.read().lstrip("\ufeff"), False
+        return _decode(sys.stdin.buffer.read() if hasattr(sys.stdin, "buffer") else sys.stdin.read(), "stdin"), False
     if arg.startswith("="):
         return arg[1:], False
     if os.path.isdir(arg):
         raise InputError(f"{arg} is a directory. Pass a FASTA file, a sequence, or - for stdin.")
     if os.path.isfile(arg):
-        return Path(arg).read_text(encoding="utf-8-sig"), False
+        return _decode(Path(arg).read_bytes(), arg), False
     return arg, True
+
+
+def _decode(raw: "bytes | str", what: str) -> str:
+    """FASTA text from a file as editors save it: UTF-8 with or without a
+    BOM, UTF-16 with a BOM (Windows Notepad), gzip, or a Latin-1 header.
+    Only the headers can be non-ASCII; a sequence that is not is refused
+    later."""
+    if isinstance(raw, str):
+        return raw.lstrip("\ufeff")
+    if raw[:2] == b"\x1f\x8b":
+        try:
+            raw = gzip.decompress(raw)
+        except (OSError, EOFError) as e:
+            raise InputError(f"{what}: not a readable gzip file ({e})") from None
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return raw.decode("utf-16").lstrip("\ufeff")
+        except UnicodeDecodeError:
+            raise InputError(f"{what}: not readable UTF-16 text") from None
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 def read_records(arg: str) -> List[Tuple[str, List[str]]]:

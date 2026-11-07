@@ -181,3 +181,23 @@ def test_public_server_batch_says_how_long_it_takes(monkeypatch, tmp_path, capsy
     assert "at least 3 minutes" in capsys.readouterr().err
     assert run(Q, "-m", "boltz", "-o", str(tmp_path / "o")) == 2
     assert "minutes" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("data", [
+    f">a\r\n{Q}\r\n".encode("utf-16"),                       # Windows Notepad "Unicode"
+    f">a caf\xe9\n{Q}\n".encode("latin-1"),                  # a Latin-1 header
+    __import__("gzip").compress(f">a\n{Q}\n".encode()),      # a .fasta.gz
+])
+def test_fasta_saved_by_other_tools_is_read(fake, tmp_path, data):
+    f = tmp_path / "x.fasta"
+    f.write_bytes(data)
+    assert run(str(f), "-m", "boltz", "-o", str(tmp_path / "o"), "--yes") == 0
+    assert fake.calls == [Q]
+
+
+def test_stdin_bytes_are_read(fake, tmp_path, monkeypatch):
+    class Stdin(io.StringIO):
+        buffer = io.BytesIO(f">a\n{Q}\n".encode("utf-16"))
+    monkeypatch.setattr("sys.stdin", Stdin(""))
+    assert run("-", "-m", "boltz", "-o", str(tmp_path / "o"), "--yes") == 0
+    assert fake.calls == [Q]

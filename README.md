@@ -63,8 +63,8 @@ chain, in chain order. For a complex, `--uniprot FILE` (once per chain, in
 the same order) adds an alignment of that chain against UniProt, such as
 AlphaFold 3's or OpenFold3's `uniprot_hits`; see Complexes.
 
-The argument to `run` is a FASTA file, `-` for stdin, or the sequence
-itself. So that a mistyped file name is never sent as a protein, a typed
+The argument to `run` is a FASTA file (UTF-8, UTF-16 as Windows Notepad
+saves it, or gzipped), `-` for stdin, or the sequence itself. So that a mistyped file name is never sent as a protein, a typed
 argument is refused when it names a directory, when a file with that name
 plus an extension exists (`query` next to `query.fasta`), or when it is
 shorter than 10 residues. To send a short peptide on purpose, start it
