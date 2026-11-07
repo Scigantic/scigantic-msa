@@ -8,7 +8,7 @@ from conftest import Q_1HVW, Q_1PXQ, Q_6T33, Q_7M22A, Q_7M22C, Q_LITEFOLD, real_
 from scigantic_msa import MSA
 from scigantic_msa.a3m import Row, parse_a3m, parse_colabfold_complex
 from scigantic_msa.adapters import (
-    PROTENIX_UNIPROT, PROTENIX_UNIREF, AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, PrepareError, Protenix,
+    PROTENIX_UNIREF, AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, PrepareError, Protenix,
     protenix_species,
 )
 from scigantic_msa.alignment import Alignment

@@ -5,14 +5,12 @@ Self-contained and offline. Each test names the defect it covers.
 import io
 import os
 import stat
-import sys
 
 import pytest
 
 from scigantic_msa import MSA
 from scigantic_msa.a3m import parse_a3m
 from scigantic_msa.adapters import AlphaFold3, Boltz, Protenix, protenix_species
-from scigantic_msa.alignment import Alignment
 from scigantic_msa.cli import main
 from scigantic_msa.remote.colabfold import RemoteResult
 

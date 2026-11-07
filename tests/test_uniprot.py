@@ -1,7 +1,6 @@
 """A UniProt alignment per chain (convert --uniprot, from_a3m(uniprot=...))
 reaches the models that pair on UniProt headers."""
 import json
-from pathlib import Path
 
 import pytest
 
