@@ -196,6 +196,9 @@ result = MSA().from_a3m("chainA.a3m", uniprot="chainA_uniprot_hits.sto")  # for 
 - `Protenix.check(path_or_jobs)` runs the same checks on any Protenix input
   JSON, including a missing `*MsaPath`, which would make Protenix start its
   own MSA search and send the sequence to a server.
+- Protenix reads only the 20 standard amino acids and `X` in a protein
+  sequence and stops on any other letter, such as `U` (selenocysteine), so
+  the Protenix adapter refuses them before writing anything.
 
 ## Complexes
 
@@ -229,7 +232,10 @@ The file layouts follow the models' own code: AlphaFold 3
 `folding_input.py`, Boltz `main.py` and `parse/csv.py`, Chai-1
 `aligned_pqt.py`, ColabFold `input.py`, OpenFold3 0.5.1
 `inference_query_format.py`, and Protenix 2.0.0 `runner/msa_search.py`,
-`protenix/data/msa/msa_featurizer.py` and `msa_utils.py`.
+`protenix/data/msa/msa_featurizer.py` and `msa_utils.py`. The opt-in tests
+in `tests/test_predictors.py` load the files with Boltz, Chai-1 and
+Protenix's own code; for Protenix that is its input JSON parser and MSA
+featurisation, up to the features and without model weights.
 
 ## Data sources and attribution
 

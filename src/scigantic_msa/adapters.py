@@ -381,6 +381,24 @@ class OpenFold3:
 PROTENIX_UNIPROT = re.compile(r"(?:tr|sp)\|[A-Z0-9]{6,10}(?:_\d+)?\|(?:[A-Z0-9]{1,10}_)(?P<SpeciesId>[A-Z0-9]{1,5})")
 PROTENIX_UNIREF = re.compile(r"^UniRef100_[^_]+_([^_/]+)")
 PROTENIX_FILES = ("pairing.a3m", "non_pairing.a3m")
+#: The letters Protenix 2.0.0 reads in a protein ``sequence``
+#: (``PROTEIN_1to3`` in ``protenix/data/inference/json_parser.py``). Any other
+#: letter, such as U or B, stops it with a KeyError.
+PROTENIX_LETTERS = frozenset("ACDEFGHIKLMNPQRSTVWYX")
+
+
+def _protenix_letters(seq: str) -> Optional[str]:
+    """Why Protenix cannot read this protein sequence, or None."""
+    bad = [(i, c) for i, c in enumerate(seq, 1) if c not in PROTENIX_LETTERS]
+    if not bad:
+        return None
+    where = ", ".join(f"{c} at {i}" for i, c in bad[:5]) + (" and more" if len(bad) > 5 else "")
+    msg = (f"Protenix reads only the 20 standard amino acids and X in a protein sequence; this one has {where}. "
+           "Replace them with X and run again.")
+    if "U" in seq:
+        msg += (" For a selenocysteine, use C and add {\"ptmType\": \"CCD_SEC\", \"ptmPosition\": N}"
+                " to the chain's modifications.")
+    return msg
 
 
 def protenix_species(header: str) -> str:
@@ -487,8 +505,12 @@ class Protenix:
         ``pairing.a3m`` for a complex whose chains share species) and return
         the input as a list with one job, ready for ``json.dump``."""
         chains = _chains(results, sequence)
-        d = _out(out_dir)
         dist = _distinct(chains)
+        for m, idx in dist:
+            why = _protenix_letters(m.query)
+            if why:
+                raise PrepareError(f"chain {idx[0] + 1}: {why}")
+        d = _out(out_dir)
         msas = [m for m, _ in dist]
         pairing = _protenix_pairing(msas)
         notes = []
@@ -555,6 +577,9 @@ def _check_protenix_chain(pc: Dict[str, Any], what: str) -> List[str]:
         q = canonical_sequence(str(pc.get("sequence", "")))
     except InvalidSequence as e:
         return [f"{what}: {e}"]
+    why = _protenix_letters(q)
+    if why:
+        out.append(f"{what}: {why}")
     files: List[Tuple[str, Path]] = []
     if "msa" in pc:
         info = pc.get("msa") or {}

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Protenix: a protein sequence with a letter other than the 20 standard
+  amino acids and `X` (such as `U`, `B`, `Z`, `J` or `O`) is refused before
+  any file is written, and `Protenix.check` reports it. Protenix 2.0.0 stops
+  on such a letter with `KeyError`.
+- Tests: an opt-in test runs Protenix's own JSON parser and MSA
+  featurisation on the files, with `SCIGANTIC_MSA_TEST_PROTENIX_PYTHON`.
+
 ## 0.2.3
 
 Changes you may notice:

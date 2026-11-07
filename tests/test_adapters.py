@@ -317,6 +317,22 @@ def test_protenix_chain_with_no_msa_is_an_error():
         Protenix.check(_job({}))
 
 
+def test_protenix_refuses_letters_its_json_parser_cannot_read(tmp_path):
+    # Protenix 2.0.0 stops with KeyError: 'U' on a selenocysteine (also B, J, O, Z).
+    a = synthetic("MKVLAGUTITLEV", ["MKVLAGCTITLEV"], {0: "9606"})
+    with pytest.raises(PrepareError, match="chain 1: .*U at 7.*CCD_SEC"):
+        Protenix.prepare(a, out_dir=tmp_path / "o")
+    assert not (tmp_path / "o").exists()
+    b = synthetic("GHSEQKZBTITLEV", ["GHSEQKEDTITLEV"])
+    with pytest.raises(PrepareError, match="chain 2: .*Z at 7, B at 8"):
+        Protenix.prepare([real_alignment(Q_6T33), b], out_dir=tmp_path / "o", quiet=True)
+    d = _good_dir(tmp_path)
+    with pytest.raises(PrepareError, match="J at 1"):
+        Protenix.check(_job({"sequence": "J" + Q_6T33[1:], "unpairedMsaPath": str(d / "non_pairing.a3m")}))
+    x = synthetic("MKVLAGXTITLEV", ["MKVLAGCTITLEV"])
+    assert Protenix.prepare(x, out_dir=tmp_path / "x")[0]["sequences"][0]["proteinChain"]["sequence"] == x.query
+
+
 def test_protenix_species_follows_protenix():
     assert protenix_species("tr|A0A146SKV9|A0A146SKV9_FUNHE/3-80") == "FUNHE"
     assert protenix_species("UniRef100_A0A2N5_10090/") == "10090"
