@@ -7,11 +7,13 @@ rows for clusters with more than one member carry the cluster's common taxon,
 not a species, and are never used. Environmental and metagenomic rows have no
 species and stay unpaired.
 
-For each species present in every chain that has species information, the
-best (first) row of each of those chains is taken. Rows are ordered by the
-sum of their ranks. A chain with no species information at all does not stop
-the others pairing: it gets ``None`` in every paired row, and each writer
-fills that in the way its model expects (gap rows, or no key).
+Every species found in two or more chains is paired: each chain that has
+it gives its best (first) row of that species, and a chain without it gets
+``None`` in that paired row. Rows shared by more chains come first, then by
+the sum of their ranks. So a chain from another organism, or one with no
+species information at all, never costs the others their pairing. Each
+writer fills in ``None`` the way its model expects (gap rows, no key, or the
+chain's next unpaired row).
 """
 from __future__ import annotations
 
@@ -85,25 +87,42 @@ def pair_by_species(msas: Sequence[Alignment], max_pairs: Optional[int] = 8192,
         return Pairing([[] for _ in msas], [], without,
                        f"no pairing: {no_species}. The chains get unpaired MSAs.")
     # Keys must be of the same kind (taxid vs mnemonic) to compare.
-    common = set(best[with_species[0]])
-    for ci in with_species[1:]:
-        common &= set(best[ci])
-    keys = sorted(common, key=lambda k: (sum(best[ci][k][0] for ci in with_species), k))
+    holders: Dict[str, List[int]] = {}
+    for ci in with_species:
+        for k in best[ci]:
+            holders.setdefault(k, []).append(ci)
+    shared = {k: cs for k, cs in holders.items() if len(cs) > 1}
+    keys = sorted(shared, key=lambda k: (-len(shared[k]), sum(best[ci][k][0] for ci in shared[k]), k))
     if max_pairs is not None:
         keys = keys[:max_pairs]
     rows: List[List[Optional[Row]]] = [
-        [best[ci][k][1] for k in keys] if ci in with_species else [None] * len(keys)
-        for ci in range(len(msas))
+        [best[ci][k][1] if k in best[ci] else None for k in keys] for ci in range(len(msas))
     ]
-    if not without:
-        msg = (f"paired {len(keys)} rows by species across {len(msas)} chains" if keys
-               else "no species is shared by all chains; the chains get unpaired MSAs")
-    elif not keys:
-        msg = (f"no species is shared by {_chains(label, with_species)}, and {no_species}; "
-               "the chains get unpaired MSAs")
+    paired = sorted({ci for k in keys for ci in shared[k]})
+    lonely = [ci for ci in with_species if ci not in paired]
+    if not keys:
+        what = ("no species is shared by any two chains" if not without
+                else f"no species is shared by {'any two of ' if len(with_species) > 2 else ''}"
+                     f"{_chains(label, with_species)}, and {no_species}")
+        return Pairing(rows, keys, without, f"{what}; the chains get unpaired MSAs")
+    if len(paired) == len(msas):
+        msg = f"paired {len(keys)} rows by species across {len(msas)} chains"
     else:
-        msg = (f"paired {len(keys)} rows by species across {_chains(label, with_species)}; {no_species}, "
-               f"so {'they are' if plural else 'it is'} not paired")
+        msg = f"paired {len(keys)} rows by species across {_chains(label, paired)}"
+    groups: Dict[tuple, int] = {}
+    for k in keys:
+        groups[tuple(shared[k])] = groups.get(tuple(shared[k]), 0) + 1
+    if len(groups) > 1:
+        msg += " (" + ", ".join(f"{n} with {_chains(label, list(g))}" for g, n in groups.items()) + ")"
+    left = []
+    if lonely:
+        many = _count(label, lonely) > 1
+        left.append(f"{_chains(label, lonely)} {'share' if many else 'shares'} no species with another chain")
+    if without:
+        left.append(no_species)
+    if left:
+        many = _count(label, lonely + without) > 1
+        msg += "; " + " and ".join(left) + f", so {'they are' if many else 'it is'} not paired"
     return Pairing(rows, keys, without, msg)
 
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Changes you may notice:
+
+- Species shared by only some chains of a complex are paired. Before,
+  AlphaFold 3, Boltz, Chai-1, ColabFold and OpenFold3 paired only species
+  present in every chain that had species, so one chain from another
+  organism removed all pairing for the others (Protenix already paired
+  them). Rows shared by more chains come first, and the notice says which
+  chains paired and how many rows each set got. `Pairing.rows` holds `None`
+  for a chain without a row of that species.
+- AlphaFold 3: where a chain has no row for a paired species, one of its
+  own unpaired rows stands in, so the rows after it stay aligned. It never
+  gets a gap row.
+- Writing a second complex into the same folder (A+B, then A+C, or then A
+  alone) no longer rewrites the first complex's MSA files and breaks its
+  pairing. Boltz CSVs with pair keys are named `<sha256>.<hash>.csv`.
+  Chai-1 files of a complex with paired rows go in
+  `<out>/chai/msas/paired-<hash>/`, which `Chai.prepare` returns and the
+  printed command uses. OpenFold3's paired folder and AlphaFold 3's
+  `inline=False` unpaired file with paired rows are named for their
+  content too. Files without pairing keep the plain name and are shared.
+
 ## 0.2.4
 
 Changes you may notice:

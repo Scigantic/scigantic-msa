@@ -17,6 +17,14 @@ them), one gap row per key for Chai-1 (it pairs a key only when every chain
 with an MSA has it), no key for Boltz (it fills the chain with its next
 unpaired row), and nothing for AlphaFold 3 (its unpaired rows stay as they
 are).
+
+Files for one chain are named by its sequence and shared by every write into
+the folder, but only while their content belongs to that sequence alone. A
+file whose rows are placed or keyed for one complex (Boltz pair keys, rows
+paired first for AlphaFold 3, Chai-1 pairing keys and gap rows, OpenFold3
+paired rows) gets a name, or a folder, with a hash of that content. So a
+second complex sharing a chain (A+B, then A+C or A alone) into the same
+folder never rewrites a file the first one points at.
 """
 from __future__ import annotations
 
@@ -29,7 +37,7 @@ import string
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .a3m import Row, format_a3m
+from .a3m import Row, format_a3m, ungapped
 from .alignment import Alignment, dedupe_rows
 from .pairing import Pairing, pair_by_species
 from .seqkey import canonical_sequence
@@ -173,16 +181,63 @@ def _file_names(files: Any, under: Tuple[str, ...] = ()) -> frozenset:
     return frozenset([under + (str(files),)]) if files is not None else frozenset()
 
 
+def _tag(data: "str | bytes") -> str:
+    """A short hash of a file's content, for the name of a file that only
+    one complex can use."""
+    return hashlib.sha256(data.encode() if isinstance(data, str) else data).hexdigest()[:16]
+
+
 def _gap_row(m: Alignment, k: int) -> Row:
     """A gap-only row standing in for a chain that has no row for pair ``k``."""
     return Row(f"gap_{k} no species information", "-" * len(m.query), "gap")
 
 
-def _unpaired_with_prepaired(m: Alignment, paired: List[Row]) -> List[Row]:
-    """Query, then the paired rows in order, then the remaining rows."""
-    used = {id(r) for r in paired}
-    rest = [r for r in m.rows[1:] if id(r) not in used]
-    return [m.rows[0]] + list(paired) + dedupe_rows([m.rows[0]] + rest)[1:]
+def _af3_key(seq: str) -> str:
+    """What AlphaFold 3 deduplicates MSA rows on: the row with insertions
+    (lowercase) removed (``msa.py``)."""
+    return "".join(c for c in seq if not c.islower())
+
+
+def _unpaired_with_prepaired(m: Alignment, paired: Sequence[Optional[Row]]) -> List[Row]:
+    """Query, then one row per paired species, then the remaining rows.
+
+    AlphaFold 3 joins unpaired rows across chains by row index, so row k+1
+    must hold pair k in every chain that has it. Where this chain has no row
+    for pair k, its next unpaired row stands in, as Boltz does; never a gap
+    row, which would count in this chain's profile. After its last paired row
+    the chain simply ends its paired part, and AlphaFold 3 pads it."""
+    q = m.rows[0]
+    seen = {ungapped(q.seq), _af3_key(q.seq)}
+    out = [q]
+
+    def fresh(r: Row) -> bool:
+        k1, k2 = ungapped(r.seq), _af3_key(r.seq)
+        if k1 in seen or k2 in seen:
+            return False
+        seen.update((k1, k2))
+        return True
+
+    usable = [r is not None and ungapped(r.seq) not in seen for r in paired]
+    taken = {id(r) for r in paired if r is not None}
+    rest = iter([r for r in m.rows[1:] if id(r) not in taken])
+    last = max((k for k, u in enumerate(usable) if u), default=-1)
+    for k in range(last + 1):
+        r = paired[k]
+        if r is not None and fresh(r):
+            out.append(r)
+            continue
+        for f in rest:
+            if fresh(f):
+                out.append(f)
+                break
+        else:
+            # Too few rows of its own to stand in: the rest of its paired
+            # rows follow as ordinary rows.
+            out += [p for p in paired[k + 1:] if p is not None and fresh(p)]
+            return out
+    out += [r for r in rest if fresh(r)]
+    out += [r for r in paired[last + 1:] if r is not None and fresh(r)]
+    return out
 
 
 # --------------------------------------------------------------------------- ColabFold
@@ -255,7 +310,9 @@ def write_af3_json(
     with ``--resolve_msa_overlaps=false``.
 
     ``inline=False`` writes ``<seq_sha256>.unpaired.a3m`` (and ``.paired.a3m``)
-    next to the JSON and uses the ``*Path`` fields, which need ``path``.
+    next to the JSON and uses the ``*Path`` fields, which need ``path``. An
+    unpaired file with rows paired for this complex is
+    ``<seq_sha256>.<hash>.unpaired.a3m``, so another complex cannot rewrite it.
     """
     if not inline and path is None:
         raise ValueError("inline=False needs a path for the JSON")
@@ -282,7 +339,7 @@ def write_af3_json(
             if pr.n_paired:
                 for c, m in enumerate(msas):
                     if c not in pr.chains_without_species:
-                        unpaired_rows[m.query] = _unpaired_with_prepaired(m, [r for r in pr.rows[c] if r])
+                        unpaired_rows[m.query] = _unpaired_with_prepaired(m, pr.rows[c])
                 notes.append(
                     "rows paired by taxid are first in unpairedMsa; run AlphaFold 3 with "
                     "--resolve_msa_overlaps=false so it keeps them"
@@ -334,7 +391,9 @@ def write_af3_json(
             prot["pairedMsa"] = pa
         else:
             assert out_path is not None
-            fn = f"{m.seq_sha256}.unpaired.a3m"
+            # Rows placed for this complex make a file of its own.
+            fn = (f"{m.seq_sha256}.unpaired.a3m" if up == format_a3m(dedupe_rows(m.rows))
+                  else f"{m.seq_sha256}.{_tag(up)}.unpaired.a3m")
             _atomic_write(out_path.parent / fn, up)
             prot["unpairedMsaPath"] = fn
             files[m.seq_sha256] = {"unpaired": fn}
@@ -380,9 +439,12 @@ def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing
     """Write Boltz MSA files and return one YAML ``msa:`` line per chain.
 
     A single distinct sequence gets ``<seq_sha256>.a3m``. Several get
-    ``<seq_sha256>.csv`` (header ``key,sequence``): the query has key -1,
-    rows paired by species get the pair index (Boltz pairs equal keys), the
-    rest -1. Boltz refuses ``.a3m.gz``, so files are never compressed.
+    a ``.csv`` (header ``key,sequence``): the query has key -1, rows paired
+    by species get the pair index (Boltz pairs equal keys), the rest -1. A
+    chain with pair keys gets ``<seq_sha256>.<hash>.csv``, since its keys
+    only mean something next to this complex's other files; one without
+    gets ``<seq_sha256>.csv``. Boltz refuses ``.a3m.gz``, so files are never
+    compressed.
     """
     d = Path(directory)
     ents = entities(chains)
@@ -406,8 +468,12 @@ def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing
             for r in m.rows[1:]:
                 if id(r) not in used:
                     lines.append(f"-1,{r.seq}")
-            p = d / f"{m.seq_sha256}.csv"
-            _atomic_write(p, "\n".join(lines) + "\n")
+            text = "\n".join(lines) + "\n"
+            # Pair keys mean something only next to this complex's other
+            # files, so a keyed file gets a name of its own.
+            keyed = any(r is not None for r in pr.rows[c])
+            p = d / (f"{m.seq_sha256}.{_tag(text)}.csv" if keyed else f"{m.seq_sha256}.csv")
+            _atomic_write(p, text)
             paths[m.query] = p
     _sidecar(d, chains, notes, {m.seq_sha256: paths[m.query].name for m in msas})
     return [f"msa: {paths[m.query]}" for m in chains]
@@ -436,7 +502,13 @@ def chai_expected_basename(sequence: str) -> str:
 def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[Path]:
     """Write ``<seq_sha256>.aligned.pqt`` per distinct sequence, the file
     Chai-1 looks up in ``--msa-directory``. Needs pyarrow
-    (``pip install 'scigantic-msa[chai]'``)."""
+    (``pip install 'scigantic-msa[chai]'``).
+
+    A complex with paired rows goes in a folder of its own,
+    ``<directory>/paired-<hash>/``: Chai-1 finds a file only by the
+    sequence, and its pairing keys and gap rows belong to this complex, so
+    another complex sharing a chain must not rewrite it. Pass the folder of
+    the returned paths to ``--msa-directory``."""
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -449,11 +521,8 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
     pr = _pairing(msas, pairing) if len(msas) > 1 else None
     if pr is not None:
         notes.append(pr.message)
-    out: Dict[str, Path] = {}
+    columns: List[Dict[str, List[str]]] = []
     for c, m in enumerate(msas):
-        name = chai_expected_basename(m.query)
-        if name != m.seq_sha256 + ".aligned.pqt":
-            raise AssertionError("Chai-1 file name does not match seq_sha256")
         keyed: Dict[int, str] = {}
         rows = [m.rows[0]]
         if pr is not None:
@@ -464,28 +533,29 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
                 rows.append(r)
         used = {id(r) for r in rows}
         rows += [r for r in m.rows[1:] if id(r) not in used]
-        seqs, srcs, keys, comments = [], [], [], []
-        for i, r in enumerate(rows):
-            seqs.append(r.seq)
-            srcs.append("query" if i == 0 else chai_source(r))
-            keys.append(keyed.get(id(r), ""))
-            comments.append(r.header)
-        table = pa.table(
-            {
-                "sequence": pa.array(seqs, pa.string()),
-                "source_database": pa.array(srcs, pa.string()),
-                "pairing_key": pa.array(keys, pa.string()),
-                "comment": pa.array(comments, pa.string()),
-            }
-        )
-        p = d / name
+        columns.append({
+            "sequence": [r.seq for r in rows],
+            "source_database": ["query" if i == 0 else chai_source(r) for i, r in enumerate(rows)],
+            "pairing_key": [keyed.get(id(r), "") for r in rows],
+            "comment": [r.header for r in rows],
+        })
+    where = d
+    if pr is not None and pr.n_paired:
+        where = d / f"paired-{_tag(json.dumps([[m.seq_sha256, col] for m, col in zip(msas, columns)]))}"
+    out: Dict[str, Path] = {}
+    for m, col in zip(msas, columns):
+        name = chai_expected_basename(m.query)
+        if name != m.seq_sha256 + ".aligned.pqt":
+            raise AssertionError("Chai-1 file name does not match seq_sha256")
+        table = pa.table({k: pa.array(v, pa.string()) for k, v in col.items()})
+        p = where / name
         buf = pa.BufferOutputStream()
         pq.write_table(table, buf)
         # A unique temp name, so writers sharing one msas folder do not
         # write into each other's file.
         _atomic_write(p, buf.getvalue().to_pybytes())
         out[m.query] = p
-    _sidecar(d, chains, notes, {m.seq_sha256: out[m.query].name for m in msas})
+    _sidecar(d, chains, notes, {m.seq_sha256: os.path.relpath(out[m.query], d) for m in msas})
     return [out[m.query] for m in chains]
 
 
@@ -513,11 +583,15 @@ def write_openfold3(chains: Sequence[Alignment], directory: "str | Path", *, pai
         pr = _pairing(msas, pairing)
         notes.append(pr.message)
         if pr.n_paired:
-            cid = hashlib.sha256("|".join(m.seq_sha256 for m in msas).encode()).hexdigest()[:16]
-            for c, m in enumerate(msas):
+            texts = [format_a3m([m.rows[0]] + [r or _gap_row(m, k) for k, r in enumerate(pr.rows[c], 1)])
+                     for c, m in enumerate(msas)]
+            # Named for the content: a complex with the same chains but
+            # other rows must not rewrite one of these files and leave the
+            # others, since every chain's file needs the same row count.
+            cid = _tag("|".join(m.seq_sha256 + "\n" + t for m, t in zip(msas, texts)))
+            for m, text in zip(msas, texts):
                 pdir = d / "paired" / cid / m.seq_sha256
-                rows = [r or _gap_row(m, k) for k, r in enumerate(pr.rows[c], 1)]
-                _atomic_write(pdir / "colabfold_paired.a3m", format_a3m([m.rows[0]] + rows))
+                _atomic_write(pdir / "colabfold_paired.a3m", text)
                 paired_dirs[m.query] = pdir
     elif len(msas) > 1:
         notes.append("uniprot_hits.a3m written for every chain; OpenFold3 pairs them by species")

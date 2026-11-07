@@ -164,7 +164,7 @@ from scigantic_msa import MSA
 from scigantic_msa.adapters import Chai
 result = MSA().get(sequence, remote=True)
 msa_dir = Chai.prepare(result, out_dir="chai_msas/")
-open("job.fasta", "w").write(Chai.fasta(result))   # chai-lab fold --msa-directory chai_msas/ job.fasta out/
+open("job.fasta", "w").write(Chai.fasta(result))   # chai-lab fold --msa-directory <msa_dir> job.fasta out/
 ```
 
 Protenix:
@@ -212,16 +212,28 @@ where the rows say the species: an NCBI taxid (from ColabFold's taxonomy
 output, or `TaxID=` / `OX=` in headers) or a UniProt species code.
 Environmental and metagenomic hits have none and stay unpaired. When
 pairing is not possible the tool says why, for example "no species is
-shared by all chains; the chains get unpaired MSAs".
+shared by any two chains; the chains get unpaired MSAs".
 
-A chain with no species information at all (only environmental or
-clustered hits, or a designed binder) does not stop the others pairing.
-The tool names it, for example "paired 8 rows by species across chains A,
-B; chain C has no rows with species information (environmental or
-clustered hits only), so it is not paired", and in the paired rows that
-chain is filled in as each model expects: gaps for ColabFold and
-OpenFold3, gap rows that carry the pairing keys for Chai-1, key -1 for
-Boltz, and its own unpaired rows for AlphaFold 3.
+Every species found in two or more chains is paired, so a chain from
+another organism, or one with no species information at all (only
+environmental or clustered hits, or a designed binder), does not stop the
+others pairing. Rows shared by more chains come first. The tool says what
+paired, for example "paired 8 rows by species across chains A, B; chain C
+shares no species with another chain, so it is not paired", or "paired 5
+rows by species across chains A, B, C (3 with chains A, B, C, 2 with
+chains A, B)". In a paired row, a chain without that species is filled in
+as each model expects: gaps for ColabFold and OpenFold3, gap rows that
+carry the pairing key for Chai-1, no key for Boltz, and one of its own
+unpaired rows for AlphaFold 3 (never a gap row, which would count in its
+profile).
+
+Several complexes can be written into one `--out` (`--name ab`, then
+`--name ac`). A file whose rows are paired for one complex never takes the
+plain per-sequence name another complex would rewrite: Boltz CSVs with
+pair keys are `<sha256>.<hash>.csv`, Chai-1 files of a complex with paired
+rows go in `msas/paired-<hash>/` (the printed command passes that folder
+to `--msa-directory`), and OpenFold3's paired files are under a folder
+named for their content. Files without pairing are shared.
 
 | model | how pairing is passed on |
 | --- | --- |

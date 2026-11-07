@@ -16,6 +16,7 @@ Each model's own convention for a chain that has no row for a paired species:
   (``create_paired_from_precomputed``); the chain gets query plus gap rows.
 """
 import json
+from pathlib import Path
 
 import pytest
 
@@ -25,6 +26,11 @@ from scigantic_msa.adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3
 from scigantic_msa.alignment import Alignment, species_key
 from scigantic_msa.pairing import pair_by_species
 from scigantic_msa.writers import write_chai, write_colabfold
+
+
+def _msa_files(yaml_text):
+    """The MSA files a Boltz YAML points at, in chain order."""
+    return [Path(json.loads(l.split("msa: ", 1)[1])) for l in yaml_text.splitlines() if "msa: " in l]
 
 
 def synthetic(query, hits, taxids=None):
@@ -104,10 +110,10 @@ def test_colabfold_pairs_two_chains_and_gaps_the_third(trio, tmp_path):
 
 
 def test_boltz_keys_pair_two_chains_and_leave_the_third_unpaired(trio, tmp_path):
-    Boltz.prepare(list(trio), out_dir=tmp_path, quiet=True)
+    y = Boltz.prepare(list(trio), out_dir=tmp_path, quiet=True)
     keys = []
-    for m in trio:
-        lines = (tmp_path / f"{m.seq_sha256}.csv").read_text().splitlines()
+    for m, f in zip(trio, _msa_files(y)):
+        lines = f.read_text().splitlines()
         keys.append([l.split(",")[0] for l in lines[2:]])
         assert len(lines) - 1 == len(m.rows)
     assert set(keys[0]) - {"-1"} == set(keys[1]) - {"-1"} == {"1", "2"}
@@ -117,8 +123,8 @@ def test_boltz_keys_pair_two_chains_and_leave_the_third_unpaired(trio, tmp_path)
 def test_chai_gives_the_third_chain_gap_rows_for_each_key(trio, tmp_path):
     pq = pytest.importorskip("pyarrow.parquet")
     a, b, c = trio
-    write_chai(trio, tmp_path)
-    tabs = [pq.read_table(tmp_path / f"{m.seq_sha256}.aligned.pqt").to_pydict() for m in trio]
+    files = write_chai(trio, tmp_path)
+    tabs = [pq.read_table(f).to_pydict() for f in files]
     ka, kb, kc = ({k for k in t["pairing_key"] if k} for t in tabs)
     assert ka == kb == kc == {"1", "2"}
     tc = tabs[2]
@@ -189,9 +195,9 @@ def test_chai_pairs_no_more_than_it_reads(tmp_path):
     taxids = {i: str(1000 + i) for i in range(n)}
     a, b = (synthetic(q, h, taxids) for q, h in hits.items())
     c = synthetic("PPAAGGYYST", ["PPAAGGYYSA"])
-    write_chai([a, b, c], tmp_path)
-    for m in (a, b, c):
-        t = pq.read_table(tmp_path / f"{m.seq_sha256}.aligned.pqt").to_pydict()
+    files = write_chai([a, b, c], tmp_path)
+    for f in files:
+        t = pq.read_table(f).to_pydict()
         assert sum(1 for k in t["pairing_key"] if k) == 8191
-    t = pq.read_table(tmp_path / f"{a.seq_sha256}.aligned.pqt").to_pydict()
+    t = pq.read_table(files[0]).to_pydict()
     assert len(t["sequence"]) == n + 1  # every row is still there
