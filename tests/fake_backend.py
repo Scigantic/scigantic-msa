@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import re
 import urllib.parse
 import uuid
 from typing import Any, Dict, Optional
@@ -27,6 +28,14 @@ def err(status: int, message: str, code: Optional[str] = None, details: Any = No
     if details is not None:
         e["details"] = details
     return status, {"Content-Type": "application/json"}, json.dumps({"error": e}).encode()
+
+
+CREATE_FIELDS = {"seqSha256", "sequence", "queryLength", "format", "kind", "compressed", "sizeBytes",
+                 "contentSha256", "source", "tool", "toolVersion", "databases", "params", "label"}
+MSA_KINDS = ("unpaired", "paired", "uniref90", "mgnify", "bfd_uniclust", "uniprot", "pdb70", "combined")
+MSA_SOURCES = ("colabfold-api", "nvidia-msa-search", "local-mmseqs2", "jackhmmer", "index", "upload", "other")
+TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:-]{0,63}$")
+PARAM_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,39}$")
 
 
 class FakeBackend:
@@ -140,6 +149,21 @@ class FakeBackend:
             return err(400, "bad size")
         if len(json.dumps(b.get("params") or {})) > 2048:
             return err(400, "params too large")
+        # The rest of parseCreateUpload in the backend's msaStore.ts.
+        if set(b) - CREATE_FIELDS:
+            return err(400, f"Unknown field: {sorted(set(b) - CREATE_FIELDS)[0]}", "invalid_request")
+        if b.get("kind") not in MSA_KINDS or b.get("source", "other") not in MSA_SOURCES:
+            return err(400, "bad kind or source", "invalid_request")
+        dbs = b.get("databases") or []
+        if len(dbs) > 16 or not all(isinstance(d, str) and TOKEN_RE.match(d) for d in dbs):
+            return err(400, "databases must be a list of at most 16 names", "invalid_request")
+        for k, v in (b.get("params") or {}).items():
+            ok_v = isinstance(v, (bool, int, float)) or (isinstance(v, str) and len(v) <= 200)
+            if not PARAM_KEY_RE.match(k) or not ok_v:
+                return err(400, f"params.{k} must be a string, number or boolean", "invalid_request")
+        for f in ("tool", "toolVersion"):
+            if b.get(f) is not None and not TOKEN_RE.match(str(b[f])):
+                return err(400, f"{f} is not a token", "invalid_request")
         aid = str(uuid.uuid4())
         self.items[aid] = dict(b, alignmentId=aid, status="pending", visibility="private", via="cli",
                                createdAt="2026-11-06T00:00:00Z", _owner=u["id"])

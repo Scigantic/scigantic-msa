@@ -21,6 +21,9 @@ _UNIREF_N = re.compile(r"\bn=(\d+)\b")
 _UNIPROT = re.compile(r"^(?:tr|sp)\|[A-Za-z0-9]{6,10}(?:_\d)?\|[A-Za-z0-9]+_([A-Za-z0-9]{1,5})(?:_\d+)?$")
 
 
+_TAXIDS_LINE = "#scigantic-msa-taxids "
+
+
 def species_key(row: Row) -> Optional[str]:
     """A key that is equal for rows from the same species, or None.
 
@@ -183,14 +186,19 @@ class MSA:
             "provenance": self.provenance,
             "attribution": self.attribution,
             "derived": self.derived,
-            "taxids": {str(i): r.taxid for i, r in enumerate(self.rows) if r.taxid},
             "n_rows": len(self.rows),
             "n_uniprot": len(self.uniprot_rows) if self.uniprot_rows else 0,
         }
+        taxids = {str(i): r.taxid for i, r in enumerate(self.rows) if r.taxid}
         text = "#scigantic-msa " + json.dumps(meta, separators=(",", ":"), sort_keys=True) + "\n"
         text += format_a3m(self.rows)
         if self.uniprot_rows:
             text += format_a3m(self.uniprot_rows[1:])
+        # The taxid map goes last. The API checks the query record in the
+        # first 256 KiB of the stored file, and a deep MSA's map can be
+        # larger than that.
+        if taxids:
+            text += _TAXIDS_LINE + json.dumps(taxids, separators=(",", ":"), sort_keys=True) + "\n"
         return gzip.compress(text.encode("utf-8"), 6, mtime=0)
 
     @classmethod
@@ -206,6 +214,16 @@ class MSA:
                 meta = json.loads(first[len("#scigantic-msa ") :])
             except ValueError:
                 raise A3MError("stored alignment has a broken metadata line") from None
+        body, sep, last = text.rstrip("\n").rpartition("\n")
+        if sep and last.startswith(_TAXIDS_LINE):
+            try:
+                taxids = json.loads(last[len(_TAXIDS_LINE) :])
+            except ValueError:
+                raise A3MError("stored alignment has a broken taxid line") from None
+            if not isinstance(taxids, dict):
+                raise A3MError("stored alignment has a broken taxid line")
+            meta = dict(meta, taxids=taxids)
+            text = body + "\n"
         return cls.from_a3m(text, source=source, query=query, meta=meta)
 
     @classmethod

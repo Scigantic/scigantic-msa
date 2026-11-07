@@ -212,3 +212,50 @@ def test_unreachable_api_is_an_account_error(monkeypatch):
     with pytest.raises(AccountError) as e:
         c.lookup([key(Q_6T33)])
     assert e.value.code == "unreachable" and "could not reach" in e.value.message
+
+
+def test_deep_bundle_keeps_the_query_inside_the_api_check_window():
+    # The API reads only the first 256 KiB of a stored file to find the query.
+    # A taxid map for 60k rows is about 1 MB, so it must not come first.
+    import zlib
+
+    from scigantic_msa.a3m import Row, a3m_query
+
+    q = Q_6T33
+    rows = [Row("q", q, "query")] + [
+        Row(f"UniRef100_X{i}\t1", "-" * (len(q) - 3) + q[-3:], "uniref", str(9606 + i)) for i in range(60000)
+    ]
+    m = MSA(query=q, rows=rows, source="remote", provenance={"from": "remote"})
+    data = m.to_bundle()
+    assert len(data) > 256 * 1024
+    head = zlib.decompressobj(wbits=31).decompress(data[: 256 * 1024])
+    text = head.decode("utf-8", "replace")
+    first_two = text.split("\n>", 2)
+    assert len(first_two) == 3, "the query record does not end inside the first 256 KiB"
+    assert a3m_query(first_two[0] + "\n>" + first_two[1]) == q
+    back = MSA.from_bundle(data, source="cache")
+    assert back.depth == m.depth
+    assert back.rows[1].taxid == "9606" and back.rows[-1].taxid == str(9606 + 59999)
+
+
+@pytest.mark.parametrize("prov,derived", [
+    ({"from": "remote", "backend": "nvidia", "databases": [f"db{i}" for i in range(17)]}, None),
+    ({"from": "remote", "backend": "nvidia", "databases": ["colabfold/uniref30"]}, None),
+    ({"from": "index", "source_id": "x" * 300}, None),
+    ({"from": "index"}, {"parent_seq_sha256": "a" * 64, "identity": None}),
+])
+def test_metadata_the_api_would_refuse_is_dropped_not_sent(backend, prov, derived):
+    c = logged_in(backend)
+    m = sample_msa()
+    m.provenance = prov
+    m.derived = derived
+    aid = c.save(m)
+    assert c.get(aid)["status"] == "ready"
+
+
+def test_index_results_are_labelled_index():
+    m = sample_msa()
+    m.provenance = {"from": "index"}
+    from scigantic_msa.account import _source_label
+
+    assert _source_label(m) == "index"

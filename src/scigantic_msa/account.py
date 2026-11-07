@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import time
 import urllib.parse
 from pathlib import Path
@@ -93,6 +95,8 @@ def _source_label(msa: MSA) -> str:
         return "nvidia-msa-search"
     if msa.provenance.get("from") == "upload":
         return "upload"
+    if msa.provenance.get("from") == "index":
+        return "index"
     return "other"
 
 
@@ -253,7 +257,7 @@ class AccountClient:
             "source": _source_label(msa),
             "tool": "scigantic-msa",
             "toolVersion": _version(),
-            "databases": [str(x) for x in (msa.provenance.get("databases") or [])][:20],
+            "databases": _databases(msa),
             "params": _small_params(msa),
         }
         if label:
@@ -343,15 +347,30 @@ def _send(method: str, url: str, **kw: Any) -> http.Response:
         raise AccountError(e.status, str(e), "unreachable") from None
 
 
+# What POST /api/msa/alignments accepts for databases and params values. The
+# metadata is a label only, so anything outside it is dropped, not sent.
+_DB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+:-]{0,63}$")
+_MAX_DATABASES = 16
+_MAX_PARAM_TEXT = 200
+
+
+def _databases(msa: MSA) -> List[str]:
+    names = [str(x) for x in (msa.provenance.get("databases") or [])]
+    return [n for n in names if _DB_NAME.match(n)][:_MAX_DATABASES]
+
+
 def _small_params(msa: MSA) -> Dict[str, Any]:
     p = msa.provenance
     out: Dict[str, Any] = {"result": msa.source, "depth": msa.depth}
-    for k in ("backend", "mode", "index_source", "source_id", "build_id", "ticket"):
-        if p.get(k) is not None:
-            out[k] = p[k]
+    picked: Dict[str, Any] = {k: p.get(k) for k in ("backend", "mode", "index_source", "source_id", "build_id", "ticket")}
     if msa.derived:
-        out["derived_from"] = msa.derived.get("parent_seq_sha256")
-        out["identity"] = msa.derived.get("identity")
+        picked["derived_from"] = msa.derived.get("parent_seq_sha256")
+        picked["identity"] = msa.derived.get("identity")
+    for k, v in picked.items():
+        if isinstance(v, bool) or (isinstance(v, (int, float)) and math.isfinite(v)):
+            out[k] = v
+        elif isinstance(v, str) and v.isprintable() and len(v) <= _MAX_PARAM_TEXT:
+            out[k] = v
     while len(json.dumps(out)) > 1800 and len(out) > 2:
         out.popitem()
     return out
