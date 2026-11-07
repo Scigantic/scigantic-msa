@@ -1,170 +1,187 @@
 # scigantic-msa
 
-Protein multiple sequence alignments (MSAs) for structure predictors, without
-running a fresh MSA search when one already exists.
+Get a multiple sequence alignment (MSA) for a protein sequence once, and
+write the input files for the structure predictor you are about to run:
+AlphaFold 3, Boltz, Chai-1, ColabFold, OpenFold3 or Protenix.
 
-For a sequence, scigantic-msa looks for an alignment in this order:
-
-1. your local cache,
-2. your Scigantic account, if you are signed in,
-3. a public index of already published MSA sets (exact match),
-4. the same index for a near-identical sequence, such as a point mutant,
-5. a search server, only if you turned one on.
-
-It then writes the input each predictor reads: ColabFold A3M, AlphaFold 3
-JSON, Boltz A3M or CSV, Chai-1 aligned parquet, or OpenFold3 MSA directories.
+The alignment comes from the ColabFold MMseqs2 server (or NVIDIA's MSA
+Search, if you have a key), or from an A3M file you already have. There is
+no account and no login, and nothing is stored on our side.
 
 ## Install
 
 ```
 pip install scigantic-msa            # or: uv tool install scigantic-msa
-pip install 'scigantic-msa[chai]'    # adds pyarrow, for Chai-1 files
+pip install 'scigantic-msa[chai]'    # adds pyarrow, needed for Chai-1 files
 ```
 
-The core has no dependencies and needs Python 3.10 or newer. Near-identical
-search uses a local `mmseqs` binary when it is installed, and plain Python
-otherwise.
-
-## Example
-
-```python
-from scigantic_msa import get_msa
-
-msa = get_msa("WGCVCSGSTAVANSHNAGPAYCVGYCGNNGVVTRNANANVAKTA")
-print(msa.source, msa.depth)        # exact 66
-msa.to_af3_json("input.json")       # or to_boltz(dir), to_chai(dir), to_colabfold(path), to_openfold3(dir)
-```
-
-From a terminal:
-
-```
-scigantic-msa get chain.fasta --format af3 --out input.json
-scigantic-msa get "SEQA:SEQB" --format boltz --out msas/     # ':' separates chains of a complex
-scigantic-msa where MKTAYIAKQRQISFVKSHFSRQ                   # which source would answer, and why
-```
-
-`msa.source` is always one of `exact`, `near`, `remote`, `cache` or
-`account`. A `near` result says which sequence it came from in
-`msa.derived` (parent hash, identity, every substitution and indel). Its rows
-were rebuilt for your sequence and row 1 is your query, which AlphaFold 3,
-Boltz and Chai require.
-
-## Where the alignments come from
-
-The index does not copy alignments. It records, for each sequence, where its
-alignment already lives (a URL, a byte offset and a length) and reads it from
-there. Every file read is checked: the byte count must match, and the first
-row must be the query. A file that fails is skipped and reported, never used.
-
-| source | what | license |
-| --- | --- | --- |
-| OpenFold3 training MSAs, `s3://openfold3-data` | about 155,000 PDB protein chains, with UniProt hits for pairing | CC BY 4.0, OpenFold Consortium |
-| LiteFold human proteome MSAs, Hugging Face `LiteFold/human-proteome-wide-msa` | 18,500 human proteins, ColabFold MSAs | CC BY 4.0, LiteFold. Built from the ColabFold databases, whose own terms also apply |
-| OpenProteinSet, `s3://openfold` | about 131,000 PDB chains and the UniClust30 set | CC BY 4.0. Ahdritz et al., OpenProteinSet, arXiv:2308.05326 |
-
-Each result carries `msa.attribution`, and every writer puts a
-`scigantic-msa-attribution.json` file next to its output with the source,
-license and any note about reuse or pairing.
-
-The index lives at `DEFAULT_INDEX_URL` in `scigantic_msa/index.py`. Set
-`SCIGANTIC_MSA_INDEX_URL` to use another copy, including a local directory.
-`scigantic-msa index download` fetches the whole index for offline use.
+Python 3.10 or newer. The core has no dependencies.
 
 ## Privacy
 
-Your sequence may be an unpublished target, so here is what leaves your
-machine at each step:
+Your sequence may be unpublished, so read this before you run a search.
 
-- cache: nothing.
-- account: the sequence hash, sent to the Scigantic API you are signed in to.
-- exact index match: the first three hex digits of the sequence hash.
-- near-identical search: the sequence length, or nothing if you have
-  downloaded the index (`scigantic-msa index download`) and have `mmseqs`.
-- remote search: the sequence itself, to the server you chose.
+- `run` and `MSA().get()` send the sequence to a third-party server:
+  api.colabfold.com by default. The public ColabFold server needs no login
+  to read a result, and the job id is a hash of the sequence, so anyone who
+  knows the sequence can download the result. Treat a submission there as
+  publishing the sequence.
+- The Python API refuses to send anything unless you pass `remote=True`.
+  The command line says which server will receive the sequence and asks
+  once; `--yes` skips the question for scripts. Without a terminal and
+  without `--yes`, it stops and sends nothing.
+- `convert` and `MSA().from_a3m()` make no network connection at all.
+- The only network traffic is to the server you chose. The tool never
+  contacts a Scigantic server.
+- The sequence is never written to a log. Results are kept in a local cache
+  (`~/.cache/scigantic-msa`, or `SCIGANTIC_MSA_CACHE`) so the same sequence
+  is not submitted twice; delete the directory to forget them, or pass
+  `--no-cache`.
+- `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks.
 
-Remote search is off until you turn it on, per call (`remote="colabfold"`,
-`--remote colabfold`) or by default (`scigantic-msa config set remote
-colabfold`). `SCIGANTIC_MSA_NO_REMOTE=1` turns it off whatever the code or
-config says. The first remote call in a process prints the server's name.
+The public ColabFold server is a shared resource with a rate limit of about
+one new job per minute per IP address. This client backs off, honours
+Retry-After, resumes a job from its id instead of submitting it again, and
+gives up after a bounded wait. To use your own server, pass `--host URL`
+(or `MSA(host=URL)`).
 
-The public ColabFold server (api.colabfold.com) needs no login to read a
-result. Its job id is a hash of the sequence, so anyone who knows the
-sequence can download your result. Treat a submission there as publishing
-the sequence. The server is a shared resource with a rate limit of about one
-new job per minute per IP address; this client backs off, resumes a job from
-its id instead of submitting again, and gives up after a bounded wait.
+## Command line
 
-The NVIDIA hosted MSA Search backend (`remote="nvidia"`, needs
-`NVIDIA_API_KEY`) is experimental.
+```
+scigantic-msa run SEQ_OR_FASTA --model boltz --out job/
+scigantic-msa run chains.fasta --model af3 --out job/ --yes
+scigantic-msa convert my_alignment.a3m --model protenix --out job/
+scigantic-msa version
+```
 
-## Your alignments in your Scigantic account
+`--model` is one of `af3`, `boltz`, `chai`, `colabfold`, `openfold3`,
+`protenix`. A FASTA file with several records is one complex, one chain per
+record; `:` inside a sequence also separates chains. `convert` takes one
+A3M (or `.a3m.gz`, or Stockholm `.sto`) per chain, in chain order.
+`--server nvidia` uses NVIDIA's hosted MSA Search and needs
+`NVIDIA_API_KEY`.
 
-Alignments you store are private to you. Nothing is stored unless you ask:
+After writing the files, the command prints the command to run the model
+on them.
+
+## Python
+
+Every adapter takes one result, or a list of results for the chains of a
+complex. The result carries its sequence; if you also pass the sequence,
+it must match.
+
+AlphaFold 3:
 
 ```python
-msa = get_msa(seq, remote="colabfold", save=True)   # or msa.save(label="WT")
+import json
+from scigantic_msa import MSA
+from scigantic_msa.adapters import AlphaFold3
+result = MSA().get(sequence, remote=True)
+json.dump(AlphaFold3.prepare(result, name="job"), open("job.json", "w"))
 ```
 
-```
-scigantic-msa login --email you@lab.edu   # emails a code; creates an account if the address has none
-scigantic-msa list
-scigantic-msa pull <id> --format chai --out msas/
-scigantic-msa push my.a3m                 # store an alignment you already have
-scigantic-msa rm <id>
+Boltz:
+
+```python
+from scigantic_msa import MSA
+from scigantic_msa.adapters import Boltz
+result = MSA().get(sequence, remote=True)
+yaml_text = Boltz.prepare(result, out_dir="boltz/")
+open("job.yaml", "w").write(yaml_text)        # then: boltz predict job.yaml
 ```
 
-Login takes one email round trip, also for a new account; you accept the
-terms before the code is used. The token lasts 30 days, is refreshed while
-you use it, and is saved with mode 0600 in `~/.config/scigantic/msa.json`.
-To use the website later, sign in with Google using the same address, or
-choose Forgot password.
+Chai-1:
 
-In a Scigantic notebook there is no login step: the notebook's own
-credentials are exchanged for a 12-hour token that is kept in memory only.
-Once signed in, `get_msa` checks your stored alignments before anything else
-that leaves the machine.
+```python
+from scigantic_msa import MSA
+from scigantic_msa.adapters import Chai
+result = MSA().get(sequence, remote=True)
+msa_dir = Chai.prepare(result, out_dir="chai_msas/")
+open("job.fasta", "w").write(Chai.fasta(result))   # chai-lab fold --msa-directory chai_msas/ job.fasta out/
+```
+
+Protenix:
+
+```python
+import json
+from scigantic_msa import MSA
+from scigantic_msa.adapters import Protenix
+result = MSA().get(sequence, remote=True)
+json.dump(Protenix.prepare(result, out_dir="protenix_msas/"), open("job.json", "w"))
+```
+
+ColabFold and OpenFold3 work the same way: `ColabFold.prepare(result,
+out_dir=...)` returns the path of the A3M for `colabfold_batch`, and
+`OpenFold3.prepare(result, out_dir=...)` returns the query JSON as a dict.
+
+With an alignment you already have, and no network:
+
+```python
+result = MSA().from_a3m("my_alignment.a3m", sequence=sequence)
+```
+
+## Checks
+
+- An A3M is checked strictly: the first record must be the query (no gaps,
+  no lowercase), only `A-Z`, `a-z` and `-` are allowed, and every row must
+  have as many match columns as the query has residues.
+- Each adapter reads back what it wrote: every file it names exists, is not
+  empty, starts with the chain's sequence, and has the name the model looks
+  for. Chai-1 skips a chain's MSA without an error when the file name is
+  wrong, and Protenix ignores a file in `precomputed_msa_dir` that is not
+  called `pairing.a3m` or `non_pairing.a3m`; here both are errors.
+- `Protenix.check(path_or_jobs)` runs the same checks on any Protenix input
+  JSON, including a missing `*MsaPath`, which would make Protenix start its
+  own MSA search and send the sequence to a server.
 
 ## Complexes
 
-```python
-from scigantic_msa import get_msas
+Each chain gets its own unpaired MSA. Rows are paired across chains only
+where the rows say the species: an NCBI taxid (from ColabFold's taxonomy
+output, or `TaxID=` / `OX=` in headers) or a UniProt species code.
+Environmental and metagenomic hits have none and stay unpaired. When
+pairing is not possible the tool says why, for example "no species is
+shared by all chains; the chains get unpaired MSAs".
 
-cx = get_msas([seq_a, seq_b])
-print(cx.pairing.message)       # for example: paired 8 rows by species across 2 chains
-cx.to_af3_json("input.json")
-```
-
-Each chain gets its own unpaired MSA. Rows are paired across chains by
-species only where the rows say the species: an NCBI taxid (ColabFold's
-taxonomy output, `TaxID=` or `OX=` in headers) or a UniProt species code.
-Environmental and metagenomic hits have none and stay unpaired; UniRef90
-clusters with more than one member are not used either. When pairing is not
-possible, `cx.pairing.message` says why.
-
-How pairing reaches each predictor:
-
-| predictor | how |
+| model | how pairing is passed on |
 | --- | --- |
-| AlphaFold 3 | UniProt rows in `pairedMsa`, which AF3 pairs itself; otherwise taxid-paired rows first in `unpairedMsa` (run with `--resolve_msa_overlaps=false`) |
-| Boltz | one CSV per chain, paired rows share a key |
+| AlphaFold 3 | paired rows first in `unpairedMsa`; run with `--resolve_msa_overlaps=false` (UniProt rows go in `pairedMsa` instead, and AF3 pairs them) |
+| Boltz | one CSV per chain; paired rows share a key |
 | Chai-1 | `pairing_key` column |
 | ColabFold | the complex A3M layout, paired rows first |
-| OpenFold3 | `uniprot_hits.a3m` per chain, or `colabfold_paired.a3m` |
+| OpenFold3 | `colabfold_paired.a3m` per chain |
+| Protenix | `pairing.a3m` per chain, with headers Protenix reads the species from; Protenix pairs them |
+
+## Formats
+
+The file layouts follow the models' own code: AlphaFold 3
+`folding_input.py`, Boltz `main.py` and `parse/csv.py`, Chai-1
+`aligned_pqt.py`, ColabFold `input.py`, OpenFold3 0.5.1
+`inference_query_format.py`, and Protenix 2.0.0 `runner/msa_search.py`,
+`protenix/data/msa/msa_featurizer.py` and `msa_utils.py`.
+
+## Data sources and attribution
+
+The alignments come from the server you chose, under its terms:
+
+- ColabFold MMseqs2 server, run by the ColabFold team. Cite Mirdita et al.,
+  ColabFold: making protein folding accessible to all, Nature Methods 19,
+  679-682 (2022), and the databases it searches (UniRef30 and the ColabFold
+  environmental database).
+- NVIDIA MSA Search (experimental here), under NVIDIA's API trial terms.
+
+Every adapter that writes files also writes `scigantic-msa-attribution.json`
+next to them, with the server, mode, date and the terms to credit.
 
 ## Settings
 
 | variable | meaning |
 | --- | --- |
-| `SCIGANTIC_MSA_INDEX_URL` | index location (URL or directory) |
-| `SCIGANTIC_MSA_REMOTE` | default remote backend: `colabfold`, `nvidia` or `off` |
-| `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to a server |
-| `SCIGANTIC_MSA_OFFLINE=1` | use only what is cached |
 | `SCIGANTIC_MSA_CACHE` | cache directory (default `~/.cache/scigantic-msa`) |
-| `SCIGANTIC_MSA_MOUNTS` | read source buckets from mounts, e.g. `s3://openfold/=/mnt/openfold` |
-| `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to search servers |
-| `SCIGANTIC_MSA_TOKEN` | an account token, instead of the saved one |
-| `SCIGANTIC_API_URL` | Scigantic API (default https://api.scigantic.com) |
-| `HF_TOKEN` | optional, sent only to huggingface.co |
+| `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server |
+| `SCIGANTIC_MSA_COLABFOLD_URL` | another ColabFold MMseqs2 server |
+| `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to the server, such as an email address |
+| `NVIDIA_API_KEY` | key for `--server nvidia` |
 
 ## Development
 
@@ -173,13 +190,13 @@ pip install -e '.[dev]'
 pytest
 ```
 
-Tests run offline against small real files in `tests/fixtures/real`, and a
-local HTTP server that stands in for the index, the ColabFold server, the
-NVIDIA endpoint and the Scigantic API. `tests/test_predictors.py` loads the
-outputs with Boltz's and Chai-1's own parsers when those packages are
-available; see the file for how to point it at them.
+The tests run offline against small real alignment files in
+`tests/fixtures/real` and a local HTTP server standing in for the ColabFold
+and NVIDIA APIs. `tests/test_predictors.py` loads the output with Boltz's
+and Chai-1's own parsers when interpreters with those packages are given;
+see the file for how.
 
 ## License
 
-MIT. The alignments themselves are under their sources' licenses, listed
-above.
+MIT. The alignments are under the terms of the server and databases they
+came from.
