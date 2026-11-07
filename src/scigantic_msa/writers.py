@@ -15,8 +15,8 @@ import copy
 import hashlib
 import json
 import os
+import secrets
 import string
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -45,7 +45,16 @@ CHAI_SOURCES = ("query", "uniprot", "uniref90", "bfd_uniclust", "mgnify")
 
 def _atomic_write(path: Path, data: "str | bytes") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="." + path.name + ".")
+    # Not mkstemp: it always makes the file 0600, so a model running as
+    # another user could not read it. os.open with 0666 lets the umask
+    # decide, as for any other new file.
+    while True:
+        tmp = str(path.parent / f".{path.name}.{secrets.token_hex(6)}.tmp")
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
+            break
+        except FileExistsError:
+            continue
     try:
         if isinstance(data, bytes):
             with os.fdopen(fd, "wb") as fb:
