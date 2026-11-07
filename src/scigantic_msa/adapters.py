@@ -653,13 +653,18 @@ def _check_protenix_chain(pc: Dict[str, Any], what: str) -> List[str]:
 #: and the name still gets an extension and maybe a _2 suffix.
 NAME_BYTES = 200
 #: Names Windows will not create a file under, with or without an extension.
-_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10))}
+#: COM and LPT take a digit 0 to 9 or a superscript 1, 2 or 3.
+_RESERVED = {"CON", "PRN", "AUX", "NUL",
+             *(f"{p}{i}" for p in ("COM", "LPT") for i in (*"0123456789", "\u00b9", "\u00b2", "\u00b3"))}
 
 
 def _safe_name(name: str) -> str:
     s = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".")
     while len(s.encode()) > NAME_BYTES:
         s = s[:-1]
+    # Windows drops a trailing dot or space, so a name cut there would not
+    # be the name written. Only '.' can be left, since spaces became '_'.
+    s = s.rstrip(". ")
     if s.split(".")[0].upper() in _RESERVED:
         s = "_" + s
     return s or "query"
