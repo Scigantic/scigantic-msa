@@ -22,9 +22,9 @@ from .a3m import A3MError
 from .adapters import PrepareError
 from .alignment import Alignment
 from .remote import BACKENDS, remote_disabled
-from .remote.colabfold import RemoteError
+from .remote.colabfold import JobFailed, RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
-from .tool import MSA, RemoteNotAllowed, protein_sequence, read_alignment
+from .tool import MSA, RemoteNotAllowed, read_alignment
 from .write import MODELS, _fname, write_model
 
 
@@ -71,23 +71,45 @@ def read_records(arg: str) -> List[Tuple[str, List[str]]]:
 
 def _parse_records(text: str) -> List[Tuple[str, List[str]]]:
     recs: List[Tuple[str, List[str]]] = []
-    if text.lstrip().startswith(">"):
+    lines = [line.strip() for line in text.splitlines()]
+    if next((line for line in lines if line), "").startswith(">"):
         name: Optional[str] = None
         cur: Optional[List[str]] = None
-        for line in text.splitlines():
+        for line in lines:
             if line.startswith(">"):
                 if cur is not None:
                     recs.append((name or "", cur))
-                name = line[1:].strip().split()[0] if line[1:].strip() else ""
+                name = line[1:].split()[0] if line[1:].strip() else ""
                 cur = []
-            elif cur is not None and line.strip():
-                cur.append(line.strip())
+            elif cur is not None and line:
+                cur.append(line)
         if cur is not None:
             recs.append((name or "", cur))
         parts = [(n, "".join(c)) for n, c in recs]
     else:
         parts = [("", "".join(text.split()))]
-    return [(n, [canonical_sequence(c) for c in p.split(":")]) for n, p in parts]
+    out: List[Tuple[str, List[str]]] = []
+    for k, (n, p) in enumerate(parts, 1):
+        chains = p.split(":")
+        cs = []
+        for i, c in enumerate(chains, 1):
+            try:
+                cs.append(canonical_sequence(c))
+            except InvalidSequence as e:
+                where = _where(n, k, len(parts), i, len(chains))
+                raise InvalidSequence(f"{where} is empty" if not c.strip() else f"{where}: {e}") from None
+        out.append((n, cs))
+    return out
+
+
+def _where(name: str, k: int, nrec: int, i: int, nchain: int) -> str:
+    """'record 2 (b) chain 1', or as much of that as tells the chains apart."""
+    parts = []
+    if nrec > 1:
+        parts.append(f"record {k} ({name})" if name else f"record {k}")
+    if nchain > 1:
+        parts.append(f"chain {i}")
+    return " ".join(parts) or "the sequence"
 
 
 def read_chains(arg: str) -> Tuple[str, List[str]]:
@@ -98,17 +120,23 @@ def read_chains(arg: str) -> Tuple[str, List[str]]:
     return name, [c for _, cs in recs for c in cs]
 
 
-def _check_typed(arg: str, chains: List[str]) -> None:
-    """Refuse a typed argument that is more likely a file name than a
-    sequence. Called only when no file or directory of that name exists."""
+def _check_near_file(arg: str) -> None:
+    """Refuse a typed argument when a file of that name plus an extension
+    exists ('query' next to 'query.fasta'). Called only when no file or
+    directory of that name exists."""
     if len(arg) < 200 and os.sep not in arg:
         try:
             near = sorted(f.name for f in Path(".").glob(glob.escape(arg) + ".*") if f.is_file())
-        except OSError:
+        except (OSError, ValueError):
             near = []
         if near:
             raise InputError(f"there is no file named {arg!r}. Did you mean {near[0]}? "
                              f"To send {arg!r} as a sequence, write it as ={arg}.")
+
+
+def _check_typed(arg: str, chains: List[str]) -> None:
+    """Refuse a typed argument that is more likely a file name than a
+    sequence because it is so short."""
     short = min(len(c) for c in chains)
     if short < MIN_LITERAL:
         raise InputError(f"{arg!r} is not a file, and as a sequence it has only {short} residues. "
@@ -118,9 +146,16 @@ def _check_typed(arg: str, chains: List[str]) -> None:
 def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tuple[str, List[str]]]:
     """The jobs to run as (name, chains). Raises InputError or InvalidSequence."""
     text, typed = _read_text(arg)
+    if typed:
+        _check_near_file(arg)
     recs = _parse_records(text)
     try:
-        recs = [(n, [protein_sequence(c, i) for i, c in enumerate(cs, 1)]) for n, cs in recs]
+        for k, (n, cs) in enumerate(recs, 1):
+            for i, c in enumerate(cs, 1):
+                bad = sorted({ch for ch in c if not ("A" <= ch <= "Z")})
+                if bad:
+                    raise InvalidSequence(f"{_where(n, k, len(recs), i, len(cs))} has characters that are "
+                                          f"not amino acid letters: {''.join(bad)!r}")
     except InvalidSequence as e:
         if typed and (len(arg) <= 40 or os.sep in arg):
             # Name the argument only when it could be a file name, so a long
@@ -151,6 +186,18 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
         if len(cs) > MAX_CHAINS:
             raise InputError(f"{n} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
     return jobs
+
+
+def _unusable_out(out: Path) -> Optional[str]:
+    """Why --out cannot be written, checked before anything is sent, or None."""
+    p = out
+    while not p.exists() and p != p.parent:
+        p = p.parent
+    if not p.is_dir():
+        return f"--out {out}: {p} is not a directory"
+    if not os.access(p, os.W_OK | os.X_OK):
+        return f"--out {out}: cannot write to {p}"
+    return None
 
 
 def _warn_nucleic(jobs: List[Tuple[str, List[str]]]) -> None:
@@ -221,6 +268,9 @@ def cmd_run(a: argparse.Namespace) -> int:
     except (InvalidSequence, InputError, OSError) as e:
         return die(str(e))
     _warn_nucleic(jobs)
+    bad_out = _unusable_out(Path(a.out))
+    if bad_out:
+        return die(bad_out)
     try:
         tool = MSA(a.server, host=a.host, cache=not a.no_cache, quiet=a.quiet)
     except ValueError as e:
@@ -236,10 +286,23 @@ def cmd_run(a: argparse.Namespace) -> int:
     elif not a.quiet:
         print("Every chain is in the local cache; nothing is sent.", file=sys.stderr)
     out = Path(a.out)
+    failed: List[str] = []
     try:
-        for name, chains in jobs:
-            got = tool.get(chains, remote=True)
-            files, nxt = write_model(a.model, got, out / name if a.batch else out, name, a.quiet)
+        for k, (name, chains) in enumerate(jobs, 1):
+            if a.batch and not a.quiet:
+                print(f"scigantic-msa: job {k} of {len(jobs)}: {name}", file=sys.stderr)
+            try:
+                got = tool.get(chains, remote=True)
+                files, nxt = write_model(a.model, got, out / name if a.batch else out, name, a.quiet)
+            except (JobFailed, A3MError, PrepareError) as e:
+                # Only this job's sequence or result is at fault, so the rest
+                # of a batch can still run. Rate limits and an unreachable
+                # server stop everything below.
+                if not a.batch:
+                    raise
+                print(f"error: {name}: {e}", file=sys.stderr)
+                failed.append(name)
+                continue
             _report(files, nxt, a.quiet)
             _depths(got, a.quiet)
     except (RemoteError, RemoteNotAllowed, A3MError, PrepareError, ImportError, OSError, ValueError) as e:
@@ -249,6 +312,9 @@ def cmd_run(a: argparse.Namespace) -> int:
             print("Interrupted. The search may still be running on the server; run the same command "
                   "again to pick up the same job without sending it again.", file=sys.stderr)
         return 130
+    if failed:
+        return die(f"{len(failed)} of {len(jobs)} jobs failed: {', '.join(failed)}. The others were written; "
+                   "run the same command again to retry, and finished jobs come from the cache.")
     return 0
 
 

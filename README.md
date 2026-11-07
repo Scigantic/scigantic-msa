@@ -39,6 +39,7 @@ Your sequence may be unpublished, so read this before you run a search.
   `--no-cache`. If the cache directory cannot be written (read-only home,
   say), the tool warns once and runs without it.
 - `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks.
+  Results already in the cache are still used, since they send nothing.
 
 The public ColabFold server is a shared resource with a rate limit of about
 one new job per minute per IP address. This client backs off, honours
@@ -77,7 +78,8 @@ with several records needs one of:
   20 chains).
 - `--batch`: each record is its own job, written to its own folder under
   `--out` and named after the record, such as `jobs/rec1/boltz/` (at most
-  100 jobs).
+  100 jobs). A job the server cannot do does not stop the others; the
+  command ends with an error naming the failed jobs.
 
 Before sending, `run` says how many sequences go to which server, and for
 a complex or batch, how many chains or jobs. After writing, `run` and
@@ -86,7 +88,8 @@ shallow or holds only the query, which makes the model run in
 single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
 
-`--host` takes an `http://` or `https://` URL.
+`--host` takes an `http://` or `https://` URL, and so do
+`SCIGANTIC_MSA_COLABFOLD_URL` and `SCIGANTIC_MSA_NVIDIA_URL`.
 `--server nvidia` uses NVIDIA's hosted MSA Search and needs
 `NVIDIA_API_KEY`.
 
@@ -247,6 +250,7 @@ next to them, with the server, mode, date and the terms to credit.
 | `SCIGANTIC_MSA_CACHE` | cache directory (default `~/.cache/scigantic-msa`) |
 | `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server |
 | `SCIGANTIC_MSA_COLABFOLD_URL` | another ColabFold MMseqs2 server |
+| `SCIGANTIC_MSA_NVIDIA_URL` | another NVIDIA MSA Search endpoint |
 | `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to the server, such as an email address |
 | `NVIDIA_API_KEY` | key for `--server nvidia` |
 
