@@ -119,8 +119,17 @@ def test_hf_token_sent_to_hf_only_and_dropped_on_cross_host_redirect(server, mon
     assert body == b"234"
     final = server.requests[-1]
     assert final.path == "/target"
-    assert "Authorization" not in final.headers
     assert final.headers.get("Range") == "bytes=2-4"
+    # An Authorization header the caller set is dropped on the cross-host hop...
+    resp = http.request("GET", server.url + "/redir", headers={"Authorization": "Bearer secret"})
+    assert resp.body == b"0123456789"
+    first, final = server.requests[-2], server.requests[-1]
+    assert first.headers.get("Authorization") == "Bearer secret"
+    assert final.path == "/target" and "Authorization" not in final.headers
+    # ...and kept on a same-host redirect.
+    server.route("GET", "/redir-same", lambda r: (307, {"Location": server.url + "/target"}, b""))
+    http.request("GET", server.url + "/redir-same", headers={"Authorization": "Bearer secret"})
+    assert server.requests[-1].headers.get("Authorization") == "Bearer secret"
 
 
 def test_local_files(tmp_path):

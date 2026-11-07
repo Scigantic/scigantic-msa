@@ -205,7 +205,6 @@ def _revalidate(rows: List[Row], query: str) -> List[Row]:
     for p in parsed:
         orig = keep.get((p.header, p.seq))
         result.append(orig if orig is not None else p)
-    result[0] = Row(rows[0].header, query, "query")
     return result
 
 
