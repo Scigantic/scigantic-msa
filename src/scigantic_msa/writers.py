@@ -26,6 +26,7 @@ import json
 import os
 import secrets
 import string
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -136,9 +137,11 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
         outputs = kept + [entry]
         sources: List[Any] = []
         for e in outputs:
-            for c in e.get("chains") or []:
-                for a in c.get("attribution") or []:
-                    if a not in sources:
+            # An entry from an older or hand-edited file can hold anything,
+            # so take only the credits that have the shape this code writes.
+            for c in _list(e.get("chains")):
+                for a in _list(c.get("attribution") if isinstance(c, dict) else None):
+                    if isinstance(a, dict) and a not in sources:
                         sources.append(a)
         data = {"written_by": "scigantic-msa", "format": 2, "sources": sources, "outputs": outputs}
         _atomic_write(path, json.dumps(data, indent=1, sort_keys=True) + "\n")
@@ -146,20 +149,33 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
         lock.release()
 
 
+def _list(v: Any) -> List[Any]:
+    return v if isinstance(v, list) else []
+
+
 def _read_sidecar(path: Path) -> List[Dict[str, Any]]:
     """The entries already in an attribution file. A file from 0.2.3 or
-    earlier (one write, at the top level) becomes one entry. A file that is
-    missing or cannot be read gives none."""
+    earlier (one write, at the top level) becomes one entry. A missing file
+    gives none. So does a file that cannot be read or is not one this code
+    wrote, and since the write that follows replaces it, that is said on
+    stderr: the credits in it are lost."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return []
-    if not isinstance(data, dict):
-        return []
-    if isinstance(data.get("outputs"), list):
+    except (OSError, ValueError) as e:
+        why = getattr(e, "strerror", None) or ("not valid JSON" if isinstance(e, ValueError) else type(e).__name__)
+        return _unreadable(path, why)
+    if isinstance(data, dict) and isinstance(data.get("outputs"), list):
         return [e for e in data["outputs"] if isinstance(e, dict)]
-    if "chains" in data or "files" in data:
+    if isinstance(data, dict) and ("chains" in data or "files" in data):
         return [{k: data.get(k) for k in ("chains", "files", "notes")}]
+    return _unreadable(path, "not an attribution file this tool wrote")
+
+
+def _unreadable(path: Path, why: str) -> List[Dict[str, Any]]:
+    print(f"scigantic-msa: warning: replacing {path} ({why}); any credits it held are not kept.",
+          file=sys.stderr, flush=True)
     return []
 
 
