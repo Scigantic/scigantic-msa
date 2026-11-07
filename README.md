@@ -56,7 +56,7 @@ scigantic-msa run SEQ_OR_FASTA --model boltz --out job/
 scigantic-msa run chains.fasta --complex --model af3 --out job/ --yes
 scigantic-msa run many.fasta --batch --model boltz --out jobs/
 scigantic-msa convert my_alignment.a3m --model protenix --out job/
-scigantic-msa version
+scigantic-msa --version
 ```
 
 `--model` is one of `af3`, `boltz`, `chai`, `colabfold`, `openfold3`,
@@ -80,8 +80,9 @@ with several records needs one of:
   20 chains).
 - `--batch`: each record is its own job, written to its own folder under
   `--out` and named after the record, such as `jobs/rec1/boltz/` (at most
-  100 jobs). A job the server cannot do does not stop the others; the
-  command ends with an error naming the failed jobs.
+  100 jobs). With `--name run1`, every job's name starts with it:
+  `jobs/run1_rec1/boltz/`. A job the server cannot do does not stop the
+  others; the command ends with an error naming the failed jobs.
 
 Before sending, `run` says how many sequences go to which server, and for
 a complex or batch, how many chains or jobs. After writing, `run` and
@@ -257,7 +258,11 @@ The alignments come from the server you chose, under its terms:
 - NVIDIA MSA Search (experimental here), under NVIDIA's API trial terms.
 
 Every adapter that writes files also writes `scigantic-msa-attribution.json`
-next to them, with the server, mode, date and the terms to credit.
+next to them, with the server, mode, date and the terms to credit. When
+several jobs, models or runs write into one folder, the file keeps one
+entry per write under `outputs`, and `sources` lists every distinct credit.
+A write replaces an older entry only when it rewrote all of that entry's
+files.
 
 ## Settings
 

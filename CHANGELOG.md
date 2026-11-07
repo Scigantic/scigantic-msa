@@ -1,6 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.2.4 (unreleased)
+
+Changes you may notice:
+
+- `scigantic-msa-attribution.json` keeps one entry per write under
+  `outputs`, and `sources` lists every distinct credit. Before, the last
+  write into a folder replaced the file, so two models or jobs written
+  there from Python, or a second `convert` or `run` with another `--name`
+  into the same `--out`, lost the earlier credit. A write replaces an older
+  entry only when it rewrote all of that entry's files. A file from 0.2.3
+  is kept as the first entry. The old top-level `chains`, `files` and
+  `notes` keys are now inside each entry.
+- `--name` with `--batch` is a prefix for every job: `--name run1` writes
+  `<out>/run1_<record>/<model>/` and names the job `run1_<record>` in every
+  model's files. Before, it was ignored.
+
+Fixes:
+
+- `scigantic-msa --version` works, as well as `scigantic-msa version`.
+
+Merged, to sort:
 
 - Protenix: a protein sequence with a letter other than the 20 standard
   amino acids and `X` (such as `U`, `B`, `Z`, `J` or `O`) is refused before

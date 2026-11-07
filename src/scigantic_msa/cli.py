@@ -2,7 +2,7 @@
 
     scigantic-msa run SEQ_OR_FASTA --model boltz --out DIR [--server colabfold|nvidia] [--yes]
     scigantic-msa convert ALIGNMENT.a3m [MORE.a3m ...] --model af3 --out DIR [--uniprot U.sto ...]
-    scigantic-msa version
+    scigantic-msa version   (or --version)
 
 ``run`` sends the sequence to the search server and asks once before it
 does (``--yes`` skips the question). ``convert`` reads alignments you
@@ -197,7 +197,8 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
         jobs: List[Tuple[str, List[str]]] = []
         seen: set = set()
         for i, (n, cs) in enumerate(recs, 1):
-            base = _fname(n or f"job{i}")
+            # --name is a prefix shared by every job of the batch.
+            base = _fname(f"{name}_{n or f'job{i}'}" if name else n or f"job{i}")
             nm, k = base, 1
             while nm.lower() in seen:
                 k += 1
@@ -378,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="scigantic-msa",
         description="Get a protein MSA once and write the input files for a structure predictor.")
+    p.add_argument("--version", action="version", version=f"scigantic-msa {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="search a server for the MSA, then write the model's input")
@@ -391,10 +393,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--complex", action="store_true",
                    help=f"a FASTA with several records is one complex, one chain per record (at most {MAX_CHAINS})")
     g.add_argument("--batch", action="store_true",
-                   help=f"each FASTA record is its own job, written to its own folder under --out (at most {MAX_JOBS})")
+                   help=f"each FASTA record is its own job, written to its own folder under --out (at most {MAX_JOBS}); "
+                        "with --name, job names are NAME_<record>")
     r.add_argument("--yes", "-y", action="store_true", help="do not ask before sending the sequence")
     r.add_argument("--no-cache", action="store_true", help="do not read or write the local cache")
-    r.add_argument("--name", help="job name used for file names (default: FASTA header or 'query')")
+    r.add_argument("--name", help="job name used for file names (default: FASTA header or 'query'); "
+                                  "with --batch, a prefix for every job's name")
     r.add_argument("--quiet", "-q", action="store_true")
     r.set_defaults(func=cmd_run)
 

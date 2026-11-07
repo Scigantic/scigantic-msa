@@ -83,7 +83,7 @@ def test_af3_complex_prepaired_by_taxid(tmp_path):
     # Rows 1 and 2 are paired by taxid in both chains.
     assert [r.taxid for r in ua[1:3]] == [r.taxid for r in ub[1:3]]
     side = json.loads((tmp_path / ATTRIBUTION_FILE).read_text())
-    assert any("--resolve_msa_overlaps=false" in n for n in side["notes"])
+    assert any("--resolve_msa_overlaps=false" in n for n in side["outputs"][0]["notes"])
 
 
 def test_boltz_monomer_and_complex(tmp_path):
