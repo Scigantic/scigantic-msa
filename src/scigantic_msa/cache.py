@@ -69,7 +69,13 @@ class FileLock:
 
     Uses fcntl on POSIX and msvcrt on Windows. The lock is released when the
     holder exits, even if it crashes, because the OS drops it with the file
-    descriptor.
+    descriptor. So a ``.lock`` file left by a crashed run is never held: it
+    is taken like any other and removed on release.
+
+    The file is removed on release while still locked. A waiter that opened
+    it before the removal checks after locking that its descriptor is still
+    the file at ``path``, and starts again if not, so two processes never
+    hold different files for the same key.
     """
 
     def __init__(self, path: Path, timeout: float = 4 * 3600, poll: float = 0.5):
@@ -80,29 +86,52 @@ class FileLock:
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fh = open(self.path, "a+b")
         deadline = time.monotonic() + self.timeout
         while True:
+            fh = open(self.path, "a+b")
             try:
-                if sys.platform == "win32":
-                    import msvcrt
-
-                    fh.seek(0)
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
-                else:
-                    import fcntl
-
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self._fh = fh
-                return
-            except OSError as e:
-                if e.errno not in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK, errno.EDEADLK):
-                    fh.close()
-                    raise
-            if time.monotonic() > deadline:
+                locked = self._try_lock(fh)
+            except OSError:
                 fh.close()
+                raise
+            if locked:
+                if self._still_ours(fh):
+                    self._fh = fh
+                    return
+                # The holder removed the file after we opened it; lock the new one.
+                fh.close()
+                continue
+            fh.close()
+            if time.monotonic() > deadline:
                 raise LockTimeout(f"timed out waiting for {self.path}")
             time.sleep(self.poll)
+
+    @staticmethod
+    def _try_lock(fh: IO[bytes]) -> bool:
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
+            else:
+                import fcntl
+
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError as e:
+            if e.errno in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK, errno.EDEADLK):
+                return False
+            raise
+
+    def _still_ours(self, fh: IO[bytes]) -> bool:
+        if sys.platform == "win32":
+            return True  # an open file cannot be removed there
+        try:
+            a, b = os.fstat(fh.fileno()), os.stat(self.path)
+        except OSError:
+            return False
+        return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
 
     def release(self) -> None:
         fh, self._fh = self._fh, None
@@ -117,9 +146,20 @@ class FileLock:
             else:
                 import fcntl
 
+                # Remove while still locked, so nobody can lock this file
+                # after it is gone from the directory and think it is theirs.
+                try:
+                    os.unlink(self.path)
+                except OSError:
+                    pass
                 fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
         finally:
             fh.close()
+        if sys.platform == "win32":
+            try:
+                os.unlink(self.path)
+            except OSError:
+                pass  # another process has it open; it removes it later
 
     def __enter__(self) -> "FileLock":
         self.acquire()
