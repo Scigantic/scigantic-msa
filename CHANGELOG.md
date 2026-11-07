@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.4 (unreleased)
+
+Changes you may notice:
+
+- `scigantic-msa-attribution.json` keeps one entry per write under
+  `outputs`, and `sources` lists every distinct credit. Before, the last
+  write into a folder replaced the file, so two models or jobs written
+  there from Python, or a second `convert` or `run` with another `--name`
+  into the same `--out`, lost the earlier credit. A write replaces an older
+  entry only when it rewrote all of that entry's files. A file from 0.2.3
+  is kept as the first entry. The old top-level `chains`, `files` and
+  `notes` keys are now inside each entry.
+
 ## 0.2.3
 
 Changes you may notice:

@@ -242,7 +242,11 @@ The alignments come from the server you chose, under its terms:
 - NVIDIA MSA Search (experimental here), under NVIDIA's API trial terms.
 
 Every adapter that writes files also writes `scigantic-msa-attribution.json`
-next to them, with the server, mode, date and the terms to credit.
+next to them, with the server, mode, date and the terms to credit. When
+several jobs, models or runs write into one folder, the file keeps one
+entry per write under `outputs`, and `sources` lists every distinct credit.
+A write replaces an older entry only when it rewrote all of that entry's
+files.
 
 ## Settings
 

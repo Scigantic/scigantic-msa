@@ -89,8 +89,14 @@ def _pairing(ents: Sequence[Alignment], pairing: Optional[Pairing]) -> Pairing:
 
 
 def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], files: Dict[str, Any]) -> None:
-    data = {
-        "written_by": "scigantic-msa",
+    """Add this write to the attribution file in ``directory``.
+
+    Several writes can share a folder (two jobs, two models from Python, a
+    rerun with another name), so the file keeps one entry per write. A new
+    entry replaces an older one only when it rewrote every file the older
+    one named; otherwise both stay, so no source is ever dropped while one
+    of its files is still there. ``sources`` lists every distinct credit."""
+    entry = {
         "chains": [
             {
                 "seq_sha256": m.seq_sha256,
@@ -106,7 +112,53 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
         "files": files,
         "notes": notes,
     }
-    _atomic_write(directory / ATTRIBUTION_FILE, json.dumps(data, indent=1, sort_keys=True) + "\n")
+    path = directory / ATTRIBUTION_FILE
+    # Imported here: cache.py is the only other user of the lock.
+    from .cache import FileLock
+
+    lock = FileLock(path, timeout=120, poll=0.05)
+    lock.acquire()
+    try:
+        mine = _file_names(files)
+        kept = [e for e in _read_sidecar(path) if not _file_names(e.get("files")) <= mine]
+        outputs = kept + [entry]
+        sources: List[Any] = []
+        for e in outputs:
+            for c in e.get("chains") or []:
+                for a in c.get("attribution") or []:
+                    if a not in sources:
+                        sources.append(a)
+        data = {"written_by": "scigantic-msa", "format": 2, "sources": sources, "outputs": outputs}
+        _atomic_write(path, json.dumps(data, indent=1, sort_keys=True) + "\n")
+    finally:
+        lock.release()
+
+
+def _read_sidecar(path: Path) -> List[Dict[str, Any]]:
+    """The entries already in an attribution file. A file from 0.2.3 or
+    earlier (one write, at the top level) becomes one entry. A file that is
+    missing or cannot be read gives none."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    if isinstance(data.get("outputs"), list):
+        return [e for e in data["outputs"] if isinstance(e, dict)]
+    if "chains" in data or "files" in data:
+        return [{k: data.get(k) for k in ("chains", "files", "notes")}]
+    return []
+
+
+def _file_names(files: Any, under: Tuple[str, ...] = ()) -> frozenset:
+    """Every file in a ``files`` map, each with the keys that lead to it, so
+    ``non_pairing.a3m`` of one chain is not taken for another chain's."""
+    if isinstance(files, dict):
+        return frozenset(f for k, v in files.items() for f in _file_names(v, under + (str(k),)))
+    if isinstance(files, (list, tuple)):
+        return frozenset(f for v in files for f in _file_names(v, under))
+    return frozenset([under + (str(files),)]) if files is not None else frozenset()
 
 
 def _unpaired_with_prepaired(m: Alignment, paired: List[Row]) -> List[Row]:
