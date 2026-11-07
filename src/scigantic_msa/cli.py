@@ -15,6 +15,7 @@ import glob
 import gzip
 import os
 import sys
+import unicodedata
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -26,7 +27,7 @@ from .remote import BACKENDS, remote_disabled
 from .remote.colabfold import JobFailed, RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
 from .tool import MSA, RemoteNotAllowed, _is_default_host, read_alignment
-from .write import MODELS, _fname, write_model
+from .write import MODELS, _fname, check_model, write_model
 
 
 
@@ -207,10 +208,10 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
             # --name is a prefix shared by every job of the batch.
             base = _fname(f"{name}_{n or f'job{i}'}" if name else n or f"job{i}")
             nm, k = base, 1
-            while nm.lower() in seen:
+            while _fold(nm) in seen:
                 k += 1
                 nm = f"{base}_{k}"
-            seen.add(nm.lower())
+            seen.add(_fold(nm))
             jobs.append((nm, cs))
     else:
         jobs = [(name or recs[0][0] or "query", [c for _, cs in recs for c in cs])]
@@ -219,6 +220,13 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
             what = f"record {n}" if batch else "the complex"
             raise InputError(f"{what} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
     return jobs
+
+
+def _fold(name: str) -> str:
+    """The key two folder names share when a file system that ignores case
+    and Unicode normalization (APFS, NTFS) takes them for one folder: 'SS'
+    and 'ß', or a precomposed Hangul syllable and its jamo."""
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
 
 
 def _unusable_out(out: Path, model: Optional[str] = None, jobs: Optional[List[str]] = None) -> Optional[str]:
@@ -319,6 +327,24 @@ def cmd_run(a: argparse.Namespace) -> int:
     bad_out = _unusable_out(Path(a.out), a.model, [n for n, _ in jobs] if a.batch else None)
     if bad_out:
         return die(bad_out)
+    # What the model's writer would refuse is refused here, before the
+    # sequence is sent: sending it would publish it on the public server
+    # for nothing. In a batch only that job is refused.
+    refused: List[str] = []
+    for name, chains in list(jobs):
+        try:
+            check_model(a.model, chains)
+        except ImportError as e:
+            return die(f"{e}. Nothing was sent.")
+        except PrepareError as e:
+            if not a.batch:
+                return die(f"{e} Nothing was sent.")
+            print(f"error: {name}: {e}", file=sys.stderr)
+            refused.append(name)
+    if refused:
+        if len(refused) == len(jobs):
+            return die(f"{a.model} cannot read any job of the batch, so nothing was sent.")
+        jobs = [j for j in jobs if j[0] not in refused]
     try:
         tool = MSA(a.server, host=a.host, cache=not a.no_cache, quiet=a.quiet)
     except ValueError as e:
@@ -345,6 +371,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         print("Every chain is in the local cache; nothing is sent.", file=sys.stderr)
     out = Path(a.out)
     failed: List[str] = []
+    total = len(jobs) + len(refused)
     try:
         for k, (name, chains) in enumerate(jobs, 1):
             if a.batch and not a.quiet:
@@ -359,7 +386,8 @@ def cmd_run(a: argparse.Namespace) -> int:
                 if not a.batch:
                     raise
                 print(f"error: {name}: {e}", file=sys.stderr)
-                failed.append(name)
+                # The model refusing the input is not fixed by running again.
+                (refused if isinstance(e, PrepareError) else failed).append(name)
                 continue
             _report(files, nxt, a.quiet)
             _depths(got, a.quiet, name if a.batch else None)
@@ -370,9 +398,16 @@ def cmd_run(a: argparse.Namespace) -> int:
             print("Interrupted. The search may still be running on the server; run the same command "
                   "again to pick up the same job without sending it again.", file=sys.stderr)
         return 130
-    if failed:
-        return die(f"{len(failed)} of {len(jobs)} jobs failed: {', '.join(failed)}. The others were written; "
-                   "run the same command again to retry, and finished jobs come from the cache.")
+    if failed or refused:
+        msg = f"{len(failed) + len(refused)} of {total} jobs failed: {', '.join(failed + refused)}."
+        if not refused:
+            return die(f"{msg} The others were written; run the same command again to retry, and finished "
+                       "jobs come from the cache.")
+        msg += (f" The others were written. {a.model} cannot read {', '.join(refused)}; change "
+                f"{'its' if len(refused) == 1 else 'their'} input, since running again gives the same error.")
+        if failed:
+            msg += f" Run the same command again to retry {', '.join(failed)}; finished jobs come from the cache."
+        return die(msg)
     return 0
 
 

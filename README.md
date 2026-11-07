@@ -93,11 +93,11 @@ shallow or holds only the query, which makes the model run in
 single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
 
-`--host` takes an `http://` or `https://` URL with no spaces, query or
-fragment, and so do `SCIGANTIC_MSA_COLABFOLD_URL` and
+`--host` takes an `http://` or `https://` URL in ASCII with no spaces,
+query or fragment, and so do `SCIGANTIC_MSA_COLABFOLD_URL` and
 `SCIGANTIC_MSA_NVIDIA_URL`. Any spelling of the public server's URL
-(`HTTPS://API.colabfold.com:443/`, say) is the public server, reached over
-https. `--server nvidia` uses NVIDIA's hosted MSA Search and needs
+(`HTTPS://API.colabfold.com:443/` or `https://api.colabfold.com/./`, say)
+is the public server, reached over https. `--server nvidia` uses NVIDIA's hosted MSA Search and needs
 `NVIDIA_API_KEY`; without it, `run` stops before asking to send.
 
 Each model's files go in their own folder under `--out` (`job/boltz/`,

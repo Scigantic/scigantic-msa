@@ -52,15 +52,38 @@ TERMS = (
 
 def public_host(host: str) -> bool:
     """True for any spelling of the public server's URL: another case, an
-    explicit default port, a trailing slash or surrounding spaces."""
+    explicit default port, a trailing slash, surrounding spaces, a path of
+    only dot segments (``/.``, ``/a/..``, ``/%2e/``) that the server reads
+    as ``/``, or a host name whose ASCII (IDNA) form is the public one."""
     parts = urllib.parse.urlsplit(host.strip())
     try:
         port = parts.port
     except ValueError:
         return False
     default = {"https": 443, "http": 80}.get(parts.scheme.lower())
-    return (default is not None and port in (None, default) and parts.path in ("", "/")
-            and (parts.hostname or "").rstrip(".") == "api.colabfold.com")
+    name = http.ascii_host(parts.hostname or "") or ""
+    return (default is not None and port in (None, default) and _dot_free(parts.path) in ("", "/")
+            and name.rstrip(".") == "api.colabfold.com")
+
+
+def _dot_free(path: str) -> str:
+    """The path with its dot segments removed (RFC 3986, 5.2.4), after
+    decoding %2e, as a server does before it routes the request."""
+    out: List[str] = []
+    segs = urllib.parse.unquote(path).split("/")
+    for i, seg in enumerate(segs):
+        last = i == len(segs) - 1
+        if seg == "..":
+            if len(out) > 1:
+                out.pop()
+            if last:
+                out.append("")
+        elif seg == ".":
+            if last:
+                out.append("")
+        else:
+            out.append(seg)
+    return "/".join(out)
 
 
 class RemoteError(Exception):
@@ -118,6 +141,7 @@ class ColabFoldClient:
         on_status: Optional[Callable[[str, str], None]] = None,
     ):
         host = (host or os.environ.get("SCIGANTIC_MSA_COLABFOLD_URL") or DEFAULT_HOST).strip().rstrip("/")
+        http.require_ascii(host, "the ColabFold server URL")
         # One spelling for the public server, so it gets its warning and
         # cache entries, and over https: http would send the sequence in clear.
         self.host = DEFAULT_HOST if public_host(host) else host
