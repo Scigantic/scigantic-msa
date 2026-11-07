@@ -267,13 +267,18 @@ class Chai:
     mgnify. Chai looks for ``sha256(sequence).aligned.pqt`` in
     ``--msa-directory`` and, if the file is missing, only logs a line and
     runs the chain without an MSA, so ``prepare`` checks every name. Rows
-    paired by species share a ``pairing_key``. Needs pyarrow.
+    paired by species share a ``pairing_key``, and a chain without a row for
+    a key gets a gap row with it (Chai pairs a key only when every chain has
+    it). Those keys belong to one complex, so a complex with paired rows
+    gets its own folder. Needs pyarrow.
     """
 
     @staticmethod
     def prepare(results: Results, sequence: Any = None, *, out_dir: Any, quiet: bool = False) -> Path:
-        """Write the parquet files into ``out_dir`` and return it: pass it to
-        ``chai-lab fold --msa-directory``."""
+        """Write the parquet files and return the folder that holds them:
+        pass it to ``chai-lab fold --msa-directory``. That is ``out_dir``,
+        or for a complex with paired rows ``out_dir/paired-<hash>/``, so
+        another complex sharing a chain cannot rewrite its files."""
         chains = _chains(results, sequence)
         d = _out(out_dir)
         pr = _pairing_note(chains, quiet)
@@ -289,7 +294,9 @@ class Chai:
             col = t.column("sequence").to_pylist()
             if col[0] != m.query or t.column("source_database").to_pylist()[0] != "query":
                 raise PrepareError(f"Chai: the first row of {p.name} is not the query")
-        return d
+        if len({p.parent for p in written}) != 1:
+            raise PrepareError("Chai: the files are not all in one folder")
+        return written[0].parent
 
     @staticmethod
     def fasta(results: Results, sequence: Any = None) -> str:

@@ -85,8 +85,8 @@ def test_chai_reads_and_pairs_our_files(chains, tmp_path):
     res = _run(py, "check_chai.py", tmp_path / "m", Q_6T33)[0]
     assert res["files"][0]["depth"] == mono.depth and res["files"][0]["length"] == len(Q_6T33)
     a, b = chains(Q_7M22A, want_uniprot=True), chains(Q_7M22C, want_uniprot=True)
-    Chai.prepare([a, b], out_dir=tmp_path / "c", quiet=True)
-    res = _run(py, "check_chai.py", tmp_path / "c", Q_7M22A, Q_7M22C)[0]
+    d = Chai.prepare([a, b], out_dir=tmp_path / "c", quiet=True)
+    res = _run(py, "check_chai.py", d, Q_7M22A, Q_7M22C)[0]
     assert [f["length"] for f in res["files"]] == [len(Q_7M22A), len(Q_7M22C)]
     assert res["merged_depth"] > 1
 
@@ -114,27 +114,36 @@ def test_boltz_and_chai_read_a_real_colabfold_result(tmp_path):
     assert res["files"][0]["length"] == len(m.query) and res["files"][0]["depth"] > 1000
 
 
-def _server_dimer():
-    """Two chains shaped like ColabFold server results (taxids from
-    uniref_tax.tsv) that share 9606 and 10090; chain 1 has two 9606 rows."""
+def _server_chain(q, hits):
+    """A chain shaped like a ColabFold server result (taxids from
+    uniref_tax.tsv): hits are (accession, position, taxid or None)."""
     from scigantic_msa.alignment import Alignment
     from scigantic_msa.remote.colabfold import ColabFoldClient
 
-    def server(q, hits):
-        def hit(i):
-            s = list(q)
-            s[i], s[i + 3] = ("G" if s[i] == "A" else "A"), ("L" if s[i + 3] == "W" else "W")
-            return "".join(s)
+    def hit(i):
+        s = list(q)
+        s[i], s[i + 3] = ("G" if s[i] == "A" else "A"), ("L" if s[i + 3] == "W" else "W")
+        return "".join(s)
 
-        tar = make_result_tar(q, [(acc, hit(i), t) for acc, i, t in hits])
-        res = ColabFoldClient("http://127.0.0.1:9").parse_result(tar, q, "t")
-        return Alignment(query=q, rows=res.rows, source="remote", provenance=res.provenance)
+    tar = make_result_tar(q, [(acc, hit(i), t) for acc, i, t in hits])
+    res = ColabFoldClient("http://127.0.0.1:9").parse_result(tar, q, "t")
+    return Alignment(query=q, rows=res.rows, source="remote", provenance=res.provenance)
 
-    return (server(Q_7M22A, [("UniRef100_P0CG48", 2, "9606"), ("UniRef100_UPI000C299439", 10, "9606"),
-                             ("UniRef100_Q9D1J1", 20, "10090"), ("UniRef100_A0A0B4J2F0", 30, "562"),
-                             ("UniRef100_X1", 40, None)]),
-            server(Q_7M22C, [("UniRef100_P06654", 2, "9606"), ("UniRef100_Q8BQ37", 10, "10090"),
-                             ("UniRef100_P11111", 20, "7227"), ("UniRef100_Y2", 30, None)]))
+
+def _server_dimer():
+    """Two chains shaped like ColabFold server results that share 9606 and
+    10090; chain 1 has two 9606 rows."""
+    return (_server_chain(Q_7M22A, [("UniRef100_P0CG48", 2, "9606"), ("UniRef100_UPI000C299439", 10, "9606"),
+                                    ("UniRef100_Q9D1J1", 20, "10090"), ("UniRef100_A0A0B4J2F0", 30, "562"),
+                                    ("UniRef100_X1", 40, None)]),
+            _server_chain(Q_7M22C, [("UniRef100_P06654", 2, "9606"), ("UniRef100_Q8BQ37", 10, "10090"),
+                                    ("UniRef100_P11111", 20, "7227"), ("UniRef100_Y2", 30, None)]))
+
+
+def _stray_chain():
+    """A third chain from another organism: one hit with a taxid neither of
+    the dimer's chains has, one with none."""
+    return _server_chain(Q_LITEFOLD, [("UniRef100_V1", 5, "10239"), ("UniRef100_V2", 15, None)])
 
 
 def _pairing_species(d):
@@ -222,8 +231,77 @@ def test_chai_pairs_two_chains_when_the_third_has_no_species(chains, tmp_path):
         pytest.skip("set SCIGANTIC_MSA_TEST_CHAI_PYTHON to an interpreter with chai_lab installed")
     pytest.importorskip("pyarrow")
     a, b, c = _species_less_trio(chains)
-    Chai.prepare([a, b, c], out_dir=tmp_path, quiet=True)
-    res = _run(py, "check_chai.py", tmp_path, a.query, b.query, c.query)[0]
+    d = Chai.prepare([a, b, c], out_dir=tmp_path, quiet=True)
+    res = _run(py, "check_chai.py", d, a.query, b.query, c.query)[0]
     # Chai counts the query as a paired row.
     assert res["paired_rows"] == pair_by_species([a, b]).n_paired + 1 == 9
     assert [f["length"] for f in res["files"]] == [len(a.query), len(b.query), len(c.query)]
+
+
+# Several complexes in one folder, and a third chain that shares no species.
+
+
+def test_boltz_pairing_survives_a_second_write_and_a_stray_chain(tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_BOLTZ_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_BOLTZ_PYTHON to an interpreter with boltz installed")
+    a, b = _server_dimer()
+    c = _stray_chain()
+    ab = _msa_paths(Boltz.prepare([a, b], out_dir=tmp_path, quiet=True))
+    Boltz.prepare([a, c], out_dir=tmp_path, quiet=True)
+    Boltz.prepare(a, out_dir=tmp_path, quiet=True)
+    abc = _msa_paths(Boltz.prepare([a, b, c], out_dir=tmp_path, quiet=True))
+    tax = {r.seq: r.taxid for m in (a, b, c) for r in m.rows}
+    for files, n in ((ab, 2), (abc, 3)):
+        res = _run(py, "check_boltz.py", *files)
+        keys = [set(r["taxonomy"]) - {-1} for r in res]
+        # Boltz reads the keys A and B share, and C has none.
+        assert len(keys[0] & keys[1]) == pair_by_species([a, b]).n_paired == 2
+        if n == 3:
+            assert keys[2] == set()
+        # Each key Boltz pairs is one species in both files.
+        rows = [dict(l.split(",", 1) for l in Path(f).read_text().splitlines()[2:] if not l.startswith("-1,"))
+                for f in files[:2]]
+        assert {k: tax[rows[0][k]] for k in rows[1]} == {k: tax[s] for k, s in rows[1].items()}
+        assert sorted(tax[s] for s in rows[0].values()) == ["10090", "9606"]
+
+
+def test_chai_pairing_survives_a_second_write_and_a_stray_chain(tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_CHAI_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_CHAI_PYTHON to an interpreter with chai_lab installed")
+    pytest.importorskip("pyarrow")
+    a, b = _server_dimer()
+    c = _stray_chain()
+    ab = Chai.prepare([a, b], out_dir=tmp_path, quiet=True)
+    Chai.prepare(a, out_dir=tmp_path, quiet=True)
+    Chai.prepare([a, c], out_dir=tmp_path, quiet=True)
+    abc = Chai.prepare([a, b, c], out_dir=tmp_path, quiet=True)
+    # Chai counts the query as a paired row.
+    assert _run(py, "check_chai.py", ab, a.query, b.query)[0]["paired_rows"] == 3
+    res = _run(py, "check_chai.py", abc, a.query, b.query, c.query)[0]
+    assert res["paired_rows"] == 3
+    assert [f["length"] for f in res["files"]] == [len(a.query), len(b.query), len(c.query)]
+
+
+def test_protenix_pairing_survives_a_second_write_and_a_stray_chain(tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_PROTENIX_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_PROTENIX_PYTHON to an interpreter that can import protenix")
+    a, b = _server_dimer()
+    c = _stray_chain()
+    jsons = []
+    for name, chains in (("ab", [a, b]), ("ac", [a, c]), ("a", [a]), ("abc", [a, b, c])):
+        jobs = Protenix.prepare(chains, out_dir=tmp_path / "msas", name=name, quiet=True)
+        jsons.append(tmp_path / f"{name}.json")
+        jsons[-1].write_text(json.dumps(jobs))
+    res = {r["name"]: r for r in _run(py, "check_protenix.py", jsons[0], jsons[3],
+                                      env={"PROTENIX_ROOT_DIR": str(tmp_path / "px")})}
+    for name in ("ab", "abc"):
+        r = res[name]
+        assert all(ch["query_row_matches"] for ch in r["chains"])
+        assert r["paired_species"][:2] == [["", "9606", "10090"]] * 2
+        for row in zip(*r["paired_species"]):
+            assert len(set(row) - {None}) == 1
+    # The stray chain gets no pairing.a3m.
+    assert list(res["abc"]["chains"][2]["files"]) == ["non_pairing.a3m"]

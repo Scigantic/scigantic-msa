@@ -116,8 +116,11 @@ def test_boltz_complex_writes_csv_with_pair_keys(dimer, tmp_path, capsys):
     assert "id: [B, C]" in y
     n = pair_by_species([a, b]).n_paired
     keys = []
-    for m in (a, b):
-        lines = (tmp_path / f"{m.seq_sha256}.csv").read_text().splitlines()
+    files = [Path(json.loads(l.split("msa: ", 1)[1])) for l in y.splitlines() if "msa: " in l]
+    for m, f in zip((a, b), files):
+        # Keyed files are named for this complex.
+        assert f.parent == tmp_path and f.name.startswith(m.seq_sha256 + ".") and f.suffix == ".csv"
+        lines = f.read_text().splitlines()
         assert lines[0] == "key,sequence" and lines[1] == f"-1,{m.query}"
         keys.append({l.split(",")[0] for l in lines[2:]} - {"-1"})
     assert len(keys[0] & keys[1]) == n == 8
@@ -138,7 +141,9 @@ def test_chai_files_are_named_for_lookup(dimer, tmp_path):
     pq = pytest.importorskip("pyarrow.parquet")
     a, b = dimer
     d = Chai.prepare([a, b], out_dir=tmp_path / "chai")
-    assert d == (tmp_path / "chai").resolve()
+    # Paired files go in a folder of their own for this complex.
+    assert d.parent == (tmp_path / "chai").resolve() and d.name.startswith("paired-")
+    assert Chai.prepare(a, out_dir=tmp_path / "chai") == (tmp_path / "chai").resolve()
     import hashlib
 
     for m in (a, b):
