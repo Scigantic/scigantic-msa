@@ -170,5 +170,6 @@ def test_every_adapter_names_the_unpaired_chain(adapter, trio, tmp_path, capsys)
 
 def test_attribution_notes_name_the_unpaired_chain(trio, tmp_path):
     Boltz.prepare(list(trio), out_dir=tmp_path, quiet=True)
-    notes = json.loads((tmp_path / "scigantic-msa-attribution.json").read_text())["notes"]
+    (entry,) = json.loads((tmp_path / "scigantic-msa-attribution.json").read_text())["outputs"]
+    notes = entry["notes"]
     assert any("chain C" in n and "not paired" in n for n in notes)
