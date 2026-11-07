@@ -15,6 +15,7 @@ import glob
 import gzip
 import os
 import sys
+import unicodedata
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -207,10 +208,10 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
             # --name is a prefix shared by every job of the batch.
             base = _fname(f"{name}_{n or f'job{i}'}" if name else n or f"job{i}")
             nm, k = base, 1
-            while nm.lower() in seen:
+            while _fold(nm) in seen:
                 k += 1
                 nm = f"{base}_{k}"
-            seen.add(nm.lower())
+            seen.add(_fold(nm))
             jobs.append((nm, cs))
     else:
         jobs = [(name or recs[0][0] or "query", [c for _, cs in recs for c in cs])]
@@ -219,6 +220,13 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
             what = f"record {n}" if batch else "the complex"
             raise InputError(f"{what} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
     return jobs
+
+
+def _fold(name: str) -> str:
+    """The key two folder names share when a file system that ignores case
+    and Unicode normalization (APFS, NTFS) takes them for one folder: 'SS'
+    and 'ß', or a precomposed Hangul syllable and its jamo."""
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
 
 
 def _unusable_out(out: Path, model: Optional[str] = None, jobs: Optional[List[str]] = None) -> Optional[str]:
