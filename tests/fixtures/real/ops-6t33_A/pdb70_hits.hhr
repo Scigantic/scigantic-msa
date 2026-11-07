@@ -1,0 +1,410 @@
+Query         query 
+Match_columns 44
+No_of_seqs    16 out of 22
+Neff          2.04266
+Searched_HMMs 90139
+Date          Sat Dec 25 00:15:11 2021
+Command       /mnt/home/dberenberg/gustaf_stuff/hh-suite/build/bin/hhsearch -i /tmp/tmp7lu76ioo/query.a3m -o /tmp/tmp7lu76ioo/output.hhr -maxseq 1000000 -cpu 2 -d /mnt/home/dberenberg/gustaf_stuff/OpenFold/pdb70/pdb70 
+
+ No Hit                             Prob E-value P-value  Score    SS Cols Query HMM  Template HMM
+  1 6T33_A Ruminococcin C; bacteri  99.9 8.8E-29 9.7E-34  138.5   0.0   44    1-44      1-44  (44)
+  2 2N2S_A pheromone Ep-1; WATER-B  64.2     5.8 6.5E-05   21.9   0.0   11   18-28     21-31  (32)
+  3 5CJQ_A CR9114 light chain, CR9  41.6      24 0.00027   21.5   0.0   16   16-31      2-17  (66)
+  4 1DF6_A CYCLOVIOLACIN O1; CYCLI  37.4      31 0.00035   18.5   0.0   15    1-15     13-27  (30)
+  5 5WOW_A Two inhibitor peptide t  36.9      32 0.00036   19.8   0.0   10   23-32     26-35  (39)
+  6 7A23_P 51kDa, Nad2m, Nad3m, Na  32.0      44 0.00048   21.8   0.0   11   17-28     92-102 (110)
+  7 2B5B_A Defensin; Antibiotic; N  30.8      47 0.00052   18.7   0.0    8   21-28      3-10  (36)
+  8 5K9G_A GTP cyclohydrolase FolE  30.8      47 0.00053   23.5   0.0   16    3-18    147-162 (257)
+  9 2PO8_A Trypsin inhibitor 2; ox  30.5      48 0.00054   18.7   0.0    8   23-30     23-30  (34)
+ 10 7RMR_A cyclic peptides, cyclot  29.4      52 0.00057   17.5   0.0   13    2-14     18-30  (30)
+ 11 2MH1_A Kalata-B1; kalata B1, s  27.7      58 0.00064   17.8   0.0   14    1-14     16-29  (33)
+ 12 2LO7_A Toxin Ts16; CS ALPHA AL  27.5      59 0.00065   18.0   0.0   11   18-28      5-15  (31)
+ 13 2R5R_A UPF0343 protein NE1163;  26.4      63  0.0007   23.3   0.0   16    3-18    157-172 (271)
+ 14 5CJS_J CR9114 light chain, CR9  25.9      65 0.00073   19.4   0.0   12   20-31      2-13  (62)
+ 15 1ZA8_A vhl-1; circular protein  25.9      66 0.00073   17.4   0.0   13    2-14     17-29  (31)
+ 16 6JI7_A coffeetide; Coffee, cys  25.3      68 0.00076   18.3   0.0    7   20-26     30-36  (36)
+ 17 2JRR_A Uncharacterized protein  24.7      71 0.00079   19.0   0.0   12   17-29     38-49  (67)
+ 18 3VUX_G Polyubiquitin-C, Tumor   24.5      72  0.0008   17.9   0.0   13   16-28     14-26  (35)
+ 19 2MJK_A Gallin protein; ANTIMIC  23.7      77 0.00085   18.4   0.0    8   21-28      7-14  (41)
+ 20 2KUK_A Leaf cyclotide 2; beta   23.3      79 0.00088   16.9   0.0   14    1-14     13-27  (30)
+ 21 1R1F_A Palicourein; Palicourei  22.8      82 0.00091   17.7   0.0   13    2-14     20-35  (37)
+ 22 4X1J_B Neuroblastoma suppresso  22.3      85 0.00094   19.1   0.0   12   18-29     39-50  (116)
+ 23 2EQF_A Tumor necrosis factor,   22.1      87 0.00096   18.5   0.0   13   16-28     19-31  (46)
+ 24 5BPU_A Frizzled-4; Wnt signall  21.5      91   0.001   19.1   0.0   11   19-29     41-51  (122)
+ 25 6T0B_q Cytochrome b-c1 complex  21.1      93   0.001   20.5   0.0   10   18-28    105-114 (130)
+ 26 4YU8_A Neuroblastoma suppresso  20.9      95  0.0011   19.9   0.0   13   18-30     54-66  (139)
+ 27 2JVM_A Uncharacterized protein  20.5      98  0.0011   19.1   0.0   11   17-28     51-61  (80)
+
+No 1
+>6T33_A Ruminococcin C; bacteriocin, ruminoccin, antibiotic, thioether bridge; NMR {[Ruminococcus] gnavus E1}
+Probab=99.90  E-value=8.8e-29  Score=138.48  Aligned_cols=44  Identities=100%  Similarity=1.642  Sum_probs=42.7  Template_Neff=2.100
+
+Q query             1 WGCVCSGSTAVANSHNAGPAYCVGYCGNNGVVTRNANANVAKTA   44 (44)
+Q Consensus         1 ~GCvCSg~~~vansH~~GP~~CVGYCg~~G~~trnAN~~~Akta   44 (44)
+                      +||||||+++|+||||+||++|||||+++|++||||||++||++
+T Consensus         1 ~GCvCsgt~avaNshn~gpa~CvgYC~~~g~v~rnAN~~~Ak~~   44 (44)
+T 6T33_A            1 WGCVCSGSTAVANSHNAGPAYCVGYCGNNGVVTRNANANVAKTA   44 (44)
+T ss_dssp             CCEECSSCHHHHHHHCCCSSSCEECCCSSCHHHHHHHHHHHHHC
+T ss_pred             CCccccCchhhcccccCCCCcccceecCCcccccchhhhccccC
+Confidence            69999999999999999999999999999999999999999985
+
+
+No 2
+>2N2S_A pheromone Ep-1; WATER-BORNE PHEROMONE, ALPHA-HELICAL PROTEIN, DISULPHIDE-RICH; NMR {Euplotes petzi}
+Probab=64.15  E-value=5.8  Score=21.91  Aligned_cols=11  Identities=45%  Similarity=1.491  Sum_probs=9.2  Template_Neff=1.000
+
+Q query            18 GPAYCVGYCGN   28 (44)
+Q Consensus        18 GP~~CVGYCg~   28 (44)
+                      .|+.|.|+|++
+T Consensus        21 apsicagwcgg   31 (32)
+T 2N2S_A           21 APSICAGWCGG   31 (32)
+T ss_dssp             CHHHHHHHHTC
+T ss_pred             ccchhccccCC
+Confidence            57899999984
+
+
+No 3
+>5CJQ_A CR9114 light chain, CR9114 heavy; hemagglutinin, trimer, influenza, immunogen, monoclonal; 3.6A {Homo sapiens}
+Probab=41.65  E-value=24  Score=21.51  Aligned_cols=16  Identities=38%  Similarity=0.927  Sum_probs=12.0  Template_Neff=4.200
+
+Q query            16 NAGPAYCVGYCGNNGV   31 (44)
+Q Consensus        16 ~~GP~~CVGYCg~~G~   31 (44)
+                      +.....|.|||..++.
+T Consensus         2 ~~~d~iC~G~ha~ns~   17 (66)
+T 5CJQ_A            2 DPGDTICIGYHANNST   17 (66)
+T ss_pred             CCCcceeeeccccCCC
+Confidence            3456789999997653
+
+
+No 4
+>1DF6_A CYCLOVIOLACIN O1; CYCLIC CYSTINE KNOT, BACKBONE CYCLIC; NMR {Viola odorata} SCOP: g.3.3.2
+Probab=37.39  E-value=31  Score=18.54  Aligned_cols=15  Identities=27%  Similarity=0.598  Sum_probs=11.4  Template_Neff=3.400
+
+Q query             1 WGCVCSGSTAVANSH   15 (44)
+Q Consensus         1 ~GCvCSg~~~vansH   15 (44)
+                      .||.|+..+-..||-
+T Consensus        13 ~GCsC~~~vCy~Ns~   27 (30)
+T 1DF6_A           13 LGCSCSNRVCYNGIP   27 (30)
+T ss_dssp             GTCEEETTEEESSSB
+T ss_pred             cCCeeCCCeeccCCc
+Confidence            389999888777763
+
+
+No 5
+>5WOW_A Two inhibitor peptide topologies 2; cyclotide, plant peptide, cyclic cystine; NMR {N/A}
+Probab=36.91  E-value=32  Score=19.82  Aligned_cols=10  Identities=50%  Similarity=0.816  Sum_probs=7.5  Template_Neff=2.000
+
+Q query            23 VGYCGNNGVV   32 (44)
+Q Consensus        23 VGYCg~~G~~   32 (44)
+                      .|||+..|.+
+T Consensus        26 ~GyCG~~~d~   35 (39)
+T 5WOW_A           26 NGYCGYPYDV   35 (39)
+T ss_dssp             TSBBSCBTTC
+T ss_pred             CCccCCCCCC
+Confidence            3899987754
+
+
+No 6
+>7A23_P 51kDa, Nad2m, Nad3m, Nad6m, Nad1m; Respiration, Complex I, mitochondria, plant; HET: FMN, NDP, PEV, SF4, U10, T7X, CDL; 3.7A {Brassica oleracea}
+Probab=32.04  E-value=44  Score=21.82  Aligned_cols=11  Identities=55%  Similarity=1.256  Sum_probs=8.7  Template_Neff=5.000
+
+Q query            17 AGPAYCVGYCGN   28 (44)
+Q Consensus        17 ~GP~~CVGYCg~   28 (44)
+                      .++..| +||+.
+T Consensus        92 ~~~~~C-pYCG~  102 (110)
+T 7A23_P           92 NEPAIC-KYCGL  102 (110)
+T ss_pred             CCCeeC-CCCCc
+Confidence            368888 99984
+
+
+No 7
+>2B5B_A Defensin; Antibiotic; NMR {Caretta caretta}
+Probab=30.84  E-value=47  Score=18.70  Aligned_cols=8  Identities=38%  Similarity=0.825  Sum_probs=6.4  Template_Neff=2.900
+
+Q query            21 YCVGYCGN   28 (44)
+Q Consensus        21 ~CVGYCg~   28 (44)
+                      .|+|||..
+T Consensus         3 ~k~GyCS~   10 (36)
+T 2B5B_A            3 KCPGRCTL   10 (36)
+T ss_dssp             CCSSCSSS
+T ss_pred             CCCccccC
+Confidence            58999975
+
+
+No 8
+>5K9G_A GTP cyclohydrolase FolE2 (E.C.3.5.4.16); HYDROLASE, BIOSYNTHETIC PROTEIN; HET: SNC, EDO; 1.9A {Neisseria gonorrhoeae (strain ATCC 700825 / FA 1090)}
+Probab=30.76  E-value=47  Score=23.50  Aligned_cols=16  Identities=25%  Similarity=0.374  Sum_probs=14.1  Template_Neff=6.700
+
+Q query             3 CVCSGSTAVANSHNAG   18 (44)
+Q Consensus         3 CvCSg~~~vansH~~G   18 (44)
+                      |-||.......+|||-
+T Consensus       147 CPCs~~~s~~~~HnQR  162 (257)
+T 5K9G_A          147 CPXSKEISQYGAHNQR  162 (257)
+T ss_dssp             CHHHHHHSSSCCCEEE
+T ss_pred             CCCccceecCCCCcce
+Confidence            8899999999999984
+
+
+No 9
+>2PO8_A Trypsin inhibitor 2; oxidative folding intermediate, PLANT PROTEIN; NMR {Momordica cochinchinensis} SCOP: g.3.2.1
+Probab=30.45  E-value=48  Score=18.67  Aligned_cols=8  Identities=50%  Similarity=1.331  Sum_probs=5.5  Template_Neff=1.900
+
+Q query            23 VGYCGNNG   30 (44)
+Q Consensus        23 VGYCg~~G   30 (44)
+                      .|||+..+
+T Consensus        23 ~G~CG~~~   30 (34)
+T 2PO8_A           23 NGYCGSGS   30 (34)
+T ss_dssp             TSBEEEGG
+T ss_pred             CCcccCCC
+Confidence            38998643
+
+
+No 10
+>7RMR_A cyclic peptides, cyclotides, quasi-racemic, PLANT; HET: DSN, DVA, DTY, DAR, DPR, DTR, DAL, DSG, DGL, DCY, DIL, DLY, DLE; 1.04A {N/A}
+Probab=29.40  E-value=52  Score=17.53  Aligned_cols=13  Identities=31%  Similarity=0.825  Sum_probs=9.3  Template_Neff=3.900
+
+Q query             2 GCVCSGSTAVANS   14 (44)
+Q Consensus         2 GCvCSg~~~vans   14 (44)
+                      ||.|+..+=..||
+T Consensus        18 GCsC~~~vC~~ns   30 (30)
+T 7RMR_A           18 GCSCKSKVCYRNG   30 (30)
+T ss_dssp             TCEEETTEEESCC
+T ss_pred             CCeeCCCeeecCC
+Confidence            8888877666554
+
+
+No 11
+>2MH1_A Kalata-B1; kalata B1, sortase A, cyclic; NMR {N/A}
+Probab=27.67  E-value=58  Score=17.76  Aligned_cols=14  Identities=36%  Similarity=0.650  Sum_probs=10.9  Template_Neff=3.700
+
+Q query             1 WGCVCSGSTAVANS   14 (44)
+Q Consensus         1 ~GCvCSg~~~vans   14 (44)
+                      .||.|+..+-+.||
+T Consensus        16 ~GCsC~~~vC~~ns   29 (33)
+T 2MH1_A           16 PGCTCSWPVCTRNG   29 (33)
+T ss_dssp             TTEEEETTEEEECS
+T ss_pred             CCCeeCCCeeecCC
+Confidence            48999888777776
+
+
+No 12
+>2LO7_A Toxin Ts16; CS ALPHA ALPHA MOTIF, ALPHA; NMR {Tityus serrulatus}
+Probab=27.55  E-value=59  Score=18.04  Aligned_cols=11  Identities=36%  Similarity=0.942  Sum_probs=8.7  Template_Neff=1.300
+
+Q query            18 GPAYCVGYCGN   28 (44)
+Q Consensus        18 GP~~CVGYCg~   28 (44)
+                      -|.||.|.|..
+T Consensus         5 ~peyca~~cr~   15 (31)
+T 2LO7_A            5 MKEYCAGQCRG   15 (31)
+T ss_dssp             CHHHHHHHCCS
+T ss_pred             chhhcccccce
+Confidence            37899999973
+
+
+No 13
+>2R5R_A UPF0343 protein NE1163; APC86493, DUF198, Nitrosomonas europaea ATCC; 3.05A {Nitrosomonas europaea ATCC 19718}
+Probab=26.44  E-value=63  Score=23.27  Aligned_cols=16  Identities=31%  Similarity=0.582  Sum_probs=14.1  Template_Neff=6.400
+
+Q query             3 CVCSGSTAVANSHNAG   18 (44)
+Q Consensus         3 CvCSg~~~vansH~~G   18 (44)
+                      |-||-......+|||-
+T Consensus       157 CPCS~~is~~~aHnQR  172 (271)
+T 2R5R_A          157 CPCSKKISDYGAHNQR  172 (271)
+T ss_dssp             CHHHHHHSSSCCCEEE
+T ss_pred             CCccccccCCccCCce
+Confidence            8899999999999984
+
+
+No 14
+>5CJS_J CR9114 light chain, CR9114 heavy; hemagglutinin, trimer, influenza, immunogen, monoclonal; HET: NAG; 4.3A {Homo sapiens}
+Probab=25.92  E-value=65  Score=19.41  Aligned_cols=12  Identities=42%  Similarity=1.002  Sum_probs=9.1  Template_Neff=4.400
+
+Q query            20 AYCVGYCGNNGV   31 (44)
+Q Consensus        20 ~~CVGYCg~~G~   31 (44)
+                      ..|.|||..++.
+T Consensus         2 ~iC~G~ha~ns~   13 (62)
+T 5CJS_J            2 TICIGYHANNST   13 (62)
+T ss_pred             ceeEeeeccCCC
+Confidence            469999987653
+
+
+No 15
+>1ZA8_A vhl-1; circular protein, cyclic cystine knot; NMR {Viola hederacea}
+Probab=25.87  E-value=66  Score=17.42  Aligned_cols=13  Identities=38%  Similarity=0.856  Sum_probs=10.0  Template_Neff=3.500
+
+Q query             2 GCVCSGSTAVANS   14 (44)
+Q Consensus         2 GCvCSg~~~vans   14 (44)
+                      ||.|+..+-..||
+T Consensus        17 GCsC~~~vC~~Ns   29 (31)
+T 1ZA8_A           17 GCSCKNKVCYLNS   29 (31)
+T ss_dssp             TCEEETTEEEBTT
+T ss_pred             CCeeCCCeeeccc
+Confidence            8889887776665
+
+
+No 16
+>6JI7_A coffeetide; Coffee, cysteine-rich peptide, iron-binding, stable; NMR {Coffea canephora}
+Probab=25.29  E-value=68  Score=18.30  Aligned_cols=7  Identities=57%  Similarity=1.402  Sum_probs=3.0  Template_Neff=1.600
+
+Q query            20 AYCVGYC   26 (44)
+Q Consensus        20 ~~CVGYC   26 (44)
+                      ..|+|-|
+T Consensus        30 ~rC~GNC   36 (36)
+T 6JI7_A           30 DRCVGNC   36 (36)
+T ss_dssp             CCEEECC
+T ss_pred             cccccCC
+Confidence            3444443
+
+
+No 17
+>2JRR_A Uncharacterized protein; solution NMR Structure, Protein, SiR90; NMR {Silicibacter pomeroyi}
+Probab=24.72  E-value=71  Score=19.01  Aligned_cols=12  Identities=33%  Similarity=0.775  Sum_probs=8.7  Template_Neff=5.400
+
+Q query            17 AGPAYCVGYCGNN   29 (44)
+Q Consensus        17 ~GP~~CVGYCg~~   29 (44)
+                      .++..| +||+..
+T Consensus        38 ~~~~~C-pYCg~~   49 (67)
+T 2JRR_A           38 TGWVEC-PYCDCK   49 (67)
+T ss_dssp             TSEEEE-TTTTEE
+T ss_pred             CCcEEC-CCCCeE
+Confidence            357778 999853
+
+
+No 18
+>3VUX_G Polyubiquitin-C, Tumor necrosis factor alpha-induced; zinc finger, PROTEIN BINDING-METAL BINDING; 1.699A {Homo sapiens}
+Probab=24.53  E-value=72  Score=17.86  Aligned_cols=13  Identities=46%  Similarity=1.060  Sum_probs=9.7  Template_Neff=3.000
+
+Q query            16 NAGPAYCVGYCGN   28 (44)
+Q Consensus        16 ~~GP~~CVGYCg~   28 (44)
+                      +-|...|.|||-.
+T Consensus        14 ~yGN~kc~GyCNe   26 (35)
+T 3VUX_G           14 HFGNAKCNGYCNE   26 (35)
+T ss_dssp             SBCCGGGTTSCHH
+T ss_pred             CccchhhcccchH
+Confidence            4467789999963
+
+
+No 19
+>2MJK_A Gallin protein; ANTIMICROBIAL PROTEIN; NMR {N/A}
+Probab=23.71  E-value=77  Score=18.38  Aligned_cols=8  Identities=50%  Similarity=1.136  Sum_probs=6.3  Template_Neff=2.700
+
+Q query            21 YCVGYCGN   28 (44)
+Q Consensus        21 ~CVGYCg~   28 (44)
+                      .|+|||..
+T Consensus         7 pk~GyCS~   14 (41)
+T 2MJK_A            7 PKIGYCSN   14 (41)
+T ss_dssp             CTTSEEES
+T ss_pred             CCCceecC
+Confidence            57899975
+
+
+No 20
+>2KUK_A Leaf cyclotide 2; beta strands, beta turn, Disulfide; NMR {Viola hederacea}
+Probab=23.32  E-value=79  Score=16.90  Aligned_cols=14  Identities=29%  Similarity=0.643  Sum_probs=9.7  Template_Neff=3.800
+
+Q query             1 WGCVCS-GSTAVANS   14 (44)
+Q Consensus         1 ~GCvCS-g~~~vans   14 (44)
+                      .||.|+ ..+=+.||
+T Consensus        13 ~GCsC~~~~vC~~ns   27 (30)
+T 2KUK_A           13 NGCTCDPWPVCTRNG   27 (30)
+T ss_dssp             SSCBCSSTTBCBBTT
+T ss_pred             CCCeeCCCCceeccc
+Confidence            488887 66666655
+
+
+No 21
+>1R1F_A Palicourein; Palicourein, Cyclotide, PLANT PROTEIN; NMR {Palicourea condensata} SCOP: g.3.3.4
+Probab=22.78  E-value=82  Score=17.73  Aligned_cols=13  Identities=31%  Similarity=0.813  Sum_probs=9.1  Template_Neff=3.300
+
+Q query             2 GCVCS---GSTAVANS   14 (44)
+Q Consensus         2 GCvCS---g~~~vans   14 (44)
+                      ||.|+   ..+-..||
+T Consensus        20 GCsC~~~~~~vC~rNs   35 (37)
+T 1R1F_A           20 GCTCDDRSDGLCKRNG   35 (37)
+T ss_dssp             TCCBCCSSSCCBCCSS
+T ss_pred             CCccccCCCCcccccC
+Confidence            88898   66665554
+
+
+No 22
+>4X1J_B Neuroblastoma suppressor of tumorigenicity 1; BMP antagonist, DAN family, Cystine-knot; HET: NAG; 2.5A {Homo sapiens}
+Probab=22.32  E-value=85  Score=19.08  Aligned_cols=12  Identities=25%  Similarity=0.537  Sum_probs=9.1  Template_Neff=7.700
+
+Q query            18 GPAYCVGYCGNN   29 (44)
+Q Consensus        18 GP~~CVGYCg~~   29 (44)
+                      .-.+|.|+|...
+T Consensus        39 ~~~~C~G~C~S~   50 (116)
+T 4X1J_B           39 QNRACLGQCFSY   50 (116)
+T ss_dssp             EEEEEEEEEEEE
+T ss_pred             ecceEeeeeeee
+Confidence            346899999864
+
+
+No 23
+>2EQF_A Tumor necrosis factor, alpha-induced protein; zf-A20 domain, Tumor necrosis factor; HET: ZN; NMR {Homo sapiens}
+Probab=22.06  E-value=87  Score=18.47  Aligned_cols=13  Identities=46%  Similarity=1.060  Sum_probs=9.8  Template_Neff=3.000
+
+Q query            16 NAGPAYCVGYCGN   28 (44)
+Q Consensus        16 ~~GP~~CVGYCg~   28 (44)
+                      +-|...|.|||-.
+T Consensus        19 hyGN~kc~GYCNe   31 (46)
+T 2EQF_A           19 HFGNAKCNGYCNE   31 (46)
+T ss_dssp             SCCBGGGTBSCHH
+T ss_pred             cccchhhcccchh
+Confidence            4467789999963
+
+
+No 24
+>5BPU_A Frizzled-4; Wnt signalling pathway, Norrie disease; HET: GGL; 2.4A {Homo sapiens}
+Probab=21.47  E-value=91  Score=19.13  Aligned_cols=11  Identities=36%  Similarity=0.745  Sum_probs=8.6  Template_Neff=7.700
+
+Q query            19 PAYCVGYCGNN   29 (44)
+Q Consensus        19 P~~CVGYCg~~   29 (44)
+                      -.+|.|+|...
+T Consensus        41 ~~~C~G~C~S~   51 (122)
+T 5BPU_A           41 LARCEGHCSQA   51 (122)
+T ss_pred             ceeeeccccce
+Confidence            35799999864
+
+
+No 25
+>6T0B_q Cytochrome b-c1 complex subunit 1; CYTOCHROME C OXIDASE CYTOCHROME BC1; HET: PCF, HEC, HEA, HEM, PEF, CDL; 2.8A {Saccharomyces cerevisiae S288c}
+Probab=21.11  E-value=93  Score=20.47  Aligned_cols=10  Identities=40%  Similarity=0.727  Sum_probs=6.3  Template_Neff=5.800
+
+Q query            18 GPAYCVGYCGN   28 (44)
+Q Consensus        18 GP~~CVGYCg~   28 (44)
+                      .|..| .+|+.
+T Consensus       105 ~p~rC-~~CG~  114 (130)
+T 6T0B_q          105 EVARC-WECGS  114 (130)
+T ss_pred             CCEec-CCCCC
+Confidence            46677 66763
+
+
+No 26
+>4YU8_A Neuroblastoma suppressor of tumorigenicity 1; BMP Binding Protein, NBL1 DAN; HET: NAG; 1.8A {Homo sapiens}
+Probab=20.93  E-value=95  Score=19.86  Aligned_cols=13  Identities=23%  Similarity=0.506  Sum_probs=8.7  Template_Neff=7.100
+
+Q query            18 GPAYCVGYCGNNG   30 (44)
+Q Consensus        18 GP~~CVGYCg~~G   30 (44)
+                      .-.+|.|+|....
+T Consensus        54 ~~~~C~G~C~S~s   66 (139)
+T 4YU8_A           54 QNRACLGQCFSYS   66 (139)
+T ss_dssp             EEEEEEEECCC--
+T ss_pred             ecceeeceecccc
+Confidence            3468999998643
+
+
+No 27
+>2JVM_A Uncharacterized protein; alpha+beta, STRUCTURAL GENOMICS, UNKNOWN FUNCTION; NMR {Rhodobacter sphaeroides 2.4.1}
+Probab=20.52  E-value=98  Score=19.13  Aligned_cols=11  Identities=45%  Similarity=1.168  Sum_probs=8.4  Template_Neff=5.200
+
+Q query            17 AGPAYCVGYCGN   28 (44)
+Q Consensus        17 ~GP~~CVGYCg~   28 (44)
+                      .++..| +||+.
+T Consensus        51 ~~~~~C-pYCg~   61 (80)
+T 2JVM_A           51 TGFVEC-GYCDR   61 (80)
+T ss_dssp             TCEEEC-SSSSC
+T ss_pred             CCeEEc-CCCCe
+Confidence            467778 89985
+
+

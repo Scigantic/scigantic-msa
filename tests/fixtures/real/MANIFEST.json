@@ -1,0 +1,102 @@
+{
+ "litefold-A0A096LP01/A0A096LP01.a3m": {
+  "bytes": 49427,
+  "sha256": "1c69ae175751d20addaa64cac2cfab99d6f1e7528bc2593cd27be97ddb32ee99",
+  "url": "https://huggingface.co/datasets/LiteFold/human-proteome-wide-msa/resolve/632cfc87f567e429570897c3addd80665a697f3e/a3m/shard-000/A0A096LP01.a3m"
+ },
+ "litefold-A0A096LP01/A0A096LP01.json": {
+  "bytes": 53452,
+  "sha256": "38a011c3515364ba277b0c0f04e39b0b5e74dd22e7005f3c33411b4d0139e055",
+  "url": "https://huggingface.co/datasets/LiteFold/human-proteome-wide-msa/resolve/632cfc87f567e429570897c3addd80665a697f3e/af3_json/shard-000/A0A096LP01.json"
+ },
+ "of3-1hvw_A/cfdb_uniref30.a3m": {
+  "bytes": 2747,
+  "sha256": "f08b61fe7e9115947019e22cfaa22ab9c54827da37c77f208ef74470fbcab374",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/1hvw_A/cfdb_uniref30.a3m"
+ },
+ "of3-1hvw_A/uniprot_hits.sto": {
+  "bytes": 10166,
+  "sha256": "415a1c6255e6dc2dde122cf2c85f255a4868173c36a5b3c2cdf347aa5905e4c9",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/1hvw_A/uniprot_hits.sto"
+ },
+ "of3-1pxq_A/cfdb_uniref30.a3m": {
+  "bytes": 6296,
+  "sha256": "a63e6f95b857b216c78521ee1e842e65dc4d5b54fbce8ae66665e183af43cd5c",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/1pxq_A/cfdb_uniref30.a3m"
+ },
+ "of3-1pxq_A/uniprot_hits.sto": {
+  "bytes": 10736,
+  "sha256": "ed2554cdf4d506ef20b17e33439c6ffb1854e1d162c31ac088aae9eb085f63c9",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/1pxq_A/uniprot_hits.sto"
+ },
+ "of3-6t33_A/cfdb_uniref30.a3m": {
+  "bytes": 7551,
+  "sha256": "cb8a481c958574058c294159ca3fd632786ddabc9bfbb12695ba1fa045b38a2d",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/6t33_A/cfdb_uniref30.a3m"
+ },
+ "of3-6t33_A/mgnify_hits.sto": {
+  "bytes": 8432,
+  "sha256": "a117cf377c3e9854ecec4220ab988bd781af28bc3e226a6d917026e623ca69b5",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/6t33_A/mgnify_hits.sto"
+ },
+ "of3-6t33_A/uniprot_hits.sto": {
+  "bytes": 8912,
+  "sha256": "958018e9c368242d6a028d38906ca6cc8d477e2801fcf2da4f5a45bafc4b7c18",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/6t33_A/uniprot_hits.sto"
+ },
+ "of3-6t33_A/uniref90_hits.sto": {
+  "bytes": 4429,
+  "sha256": "0698738caf6efb8052e21e89cf300fd47315806c51e284d18d7f174c10641c98",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/6t33_A/uniref90_hits.sto"
+ },
+ "of3-7m22_A/cfdb_uniref30.a3m": {
+  "bytes": 2703,
+  "sha256": "04aa6e41636896da68a5589522831b10d2525923f0f4b336c74e40c93a3c0645",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/7m22_A/cfdb_uniref30.a3m"
+ },
+ "of3-7m22_A/uniprot_hits.sto": {
+  "bytes": 20907,
+  "sha256": "dcc79668ea45252d0d53be03449479e9816e099a01a1de4a8eeb103d15bf63a9",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/7m22_A/uniprot_hits.sto"
+ },
+ "of3-7m22_C/cfdb_uniref30.a3m": {
+  "bytes": 2372,
+  "sha256": "740464f28e0a9bb93635b0bcca80613d1d373f38cbf80af236687970c735161b",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/7m22_C/cfdb_uniref30.a3m"
+ },
+ "of3-7m22_C/uniprot_hits.sto": {
+  "bytes": 16617,
+  "sha256": "16e645878e0c50a904b1bec2d25c0735c7ed0ce1b4504198bf9de2d5695ec452",
+  "url": "https://openfold3-data.s3.us-west-2.amazonaws.com/msas/pdb_msas_completed/7m22_C/uniprot_hits.sto"
+ },
+ "ops-6t33_A/bfd_uniclust_hits.a3m": {
+  "bytes": 3153,
+  "sha256": "f838d69405fe05daa312007544ce1bd9dd7c5d1a5be3c3f828bf80a723085fdd",
+  "url": "https://openfold.s3.amazonaws.com/pdb/6t33_A/a3m/bfd_uniclust_hits.a3m"
+ },
+ "ops-6t33_A/mgnify_hits.a3m": {
+  "bytes": 4886,
+  "sha256": "6616473ade7b0382fd4814084ae5a236460fb598a2d98d220caeaa2514c682f6",
+  "url": "https://openfold.s3.amazonaws.com/pdb/6t33_A/a3m/mgnify_hits.a3m"
+ },
+ "ops-6t33_A/pdb70_hits.hhr": {
+  "bytes": 18459,
+  "sha256": "07a5f275339a0feb995171fdf7812a257e822e5c6cd591899bb9c2a20526bb50",
+  "url": "https://openfold.s3.amazonaws.com/pdb/6t33_A/hhr/pdb70_hits.hhr"
+ },
+ "ops-6t33_A/uniref90_hits.a3m": {
+  "bytes": 3696,
+  "sha256": "4b50c403a608abab88249c429a9e99dc8df3aed889c687b5c2117463338ca813",
+  "url": "https://openfold.s3.amazonaws.com/pdb/6t33_A/a3m/uniref90_hits.a3m"
+ },
+ "uniclust30-A0A1A9ZI35/uniclust30.a3m": {
+  "bytes": 63150,
+  "sha256": "98afec1334cea4855923f471058828169cfd0dfc5414c1c3fb31aed02aed9e6d",
+  "url": "https://openfold.s3.amazonaws.com/uniclust30/A0A1A9ZI35/a3m/uniclust30.a3m"
+ },
+ "uniclust30-M4VQ73/uniclust30.a3m": {
+  "bytes": 61161,
+  "sha256": "fcceb7e481ea10a1d7c9d21a0b95b40d8e86cdf4d7aec903c7a6774cf5a08af0",
+  "url": "https://openfold.s3.amazonaws.com/uniclust30/M4VQ73/a3m/uniclust30.a3m"
+ }
+}

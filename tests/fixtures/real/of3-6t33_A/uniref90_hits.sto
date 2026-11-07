@@ -1,0 +1,44 @@
+# STOCKHOLM 1.0
+
+#=GS UniRef90_A0A6N2WBM1/20-63    DE [subseq from] Bacteriocin n=2 Tax=Lachnospiraceae TaxID=186803 RepID=A0A6N2WBM1_9FIRM
+#=GS UniRef90_G0LD23/21-63        DE [subseq from] Unmodified of the bacteriocin ruminococcin C n=4 Tax=Eubacteriales TaxID=186802 RepID=G0LD23_MEDGN
+#=GS UniRef90_A0A414S786/21-63    DE [subseq from] Unmodified of the bacteriocin ruminococcin C n=10 Tax=Eubacteriales TaxID=186802 RepID=A0A414S786_MEDGN
+#=GS UniRef90_G0LD19/21-63        DE [subseq from] Unmodified of the bacteriocin ruminococcin C n=8 Tax=Eubacteriales TaxID=186802 RepID=G0LD19_MEDGN
+#=GS UniRef90_UPI001897CE3D/21-63 DE [subseq from] RumC family sactipeptide n=1 Tax=Coprococcus comes TaxID=410072 RepID=UPI001897CE3D
+#=GS UniRef90_UPI00189A193F/21-63 DE [subseq from] RumC family sactipeptide n=1 Tax=Coprococcus comes TaxID=410072 RepID=UPI00189A193F
+#=GS UniRef90_A0A3E4USF0/21-62    DE [subseq from] RumC family sactipeptide n=1 Tax=Ruminococcus gnavus TaxID=33038 RepID=A0A3E4USF0_MEDGN
+#=GS UniRef90_A0A3E4URN2/21-63    DE [subseq from] RumC family sactipeptide n=4 Tax=Lachnospiraceae TaxID=186803 RepID=A0A3E4URN2_MEDGN
+#=GS UniRef90_UPI0008D9C202/21-62 DE [subseq from] RumC family sactipeptide n=1 Tax=Coprococcus phoceensis TaxID=1870993 RepID=UPI0008D9C202
+#=GS UniRef90_A0A414SBV1/21-61    DE [subseq from] Unmodified of the bacteriocin ruminococcin C n=5 Tax=Eubacteriales TaxID=186802 RepID=A0A414SBV1_MEDGN
+#=GS UniRef90_A0A414UQQ7/21-62    DE [subseq from] Unmodified of the bacteriocin ruminococcin C n=7 Tax=Eubacteriales TaxID=186802 RepID=A0A414UQQ7_MEDGN
+#=GS UniRef90_UPI0022E6D4EC/21-63 DE [subseq from] RumC family sactipeptide n=1 Tax=Ruminococcus gnavus TaxID=33038 RepID=UPI0022E6D4EC
+#=GS UniRef90_A0A3E4UVN6/21-61    DE [subseq from] RumC family sactipeptide n=2 Tax=Lachnospiraceae TaxID=186803 RepID=A0A3E4UVN6_MEDGN
+#=GS UniRef90_A0AAJ1EW70/21-62    DE [subseq from] RumC family sactipeptide n=2 Tax=Lachnospiraceae TaxID=186803 RepID=A0AAJ1EW70_MEDGN
+#=GS UniRef90_A0A7U9RUR9/28-68    DE [subseq from] Uncharacterized protein n=1 Tax=Lachnospiraceae bacterium TaxID=1898203 RepID=A0A7U9RUR9_9FIRM
+#=GS UniRef90_A0A174TUD7/26-68    DE [subseq from] RumC family sactipeptide n=1 Tax=Blautia wexlerae TaxID=418240 RepID=A0A174TUD7_9FIRM
+#=GS UniRef90_S0J2E4/25-64        DE [subseq from] Uncharacterized protein n=2 Tax=Eubacteriales TaxID=186802 RepID=S0J2E4_9FIRM
+#=GS UniRef90_A0A419T9H1/28-65    DE [subseq from] Uncharacterized protein n=1 Tax=Lacrimispora algidixylanolytica TaxID=94868 RepID=A0A419T9H1_9FIRM
+#=GS UniRef90_R9ITH4/27-66        DE [subseq from] Uncharacterized protein n=1 Tax=Lachnospiraceae bacterium A4 TaxID=397291 RepID=R9ITH4_9FIRM
+
+6t33_1|A|A|PROTEIN                   WGCVCSGSTAVANSHNAGPAYCVGYCGNNGVVTRNANANVAKTA
+UniRef90_A0A6N2WBM1/20-63            WGCKCSGGTVVENSHYAGPAYCVGYCGNNGVVTRNANANIAKTA
+UniRef90_G0LD23/21-63                -GCICSGSVAVANSHNAGPAYCVGYCGNNGAVTRNANANLARTA
+UniRef90_A0A414S786/21-63            -GCVCSGSVAVANSHNAGLAYCVGYCGNNGVVTRNANANIAKTA
+UniRef90_G0LD19/21-63                -GCICNGTVAVANSHNAGPAYCVGYCGNSGVVTRNANANVAKTA
+UniRef90_UPI001897CE3D/21-63         -GCICSGSVAVANSHDAGPAYCVGYCGNNGITTRNANANLARTA
+UniRef90_UPI00189A193F/21-63         -GCICSGSVAVANSHDAGPAYCVGYCGNNGVTTRNANANLARTA
+UniRef90_A0A3E4USF0/21-62            -GCICSGSVAVANAHDAGPAYCVGYCGNNGTVTRNANANLART-
+UniRef90_A0A3E4URN2/21-63            -GCICSGSVAVANAHNAGPAYCVGYCGSNGTVTRNANANLARTA
+UniRef90_UPI0008D9C202/21-62         -DCICSGTIAVKNSHYAGPAYCVGYCGNNGIVTRNANANLAKT-
+UniRef90_A0A414SBV1/21-61            -GCVCSGTVAVANSHNAGPAYCVGYCGNNGEVTRNANYNIAR--
+UniRef90_A0A414UQQ7/21-62            -GCKCSGGAVVENSHNAGPAYCVGYCGNNGVVTRNANANLART-
+UniRef90_UPI0022E6D4EC/21-63         -GCVCSGSAAVASSHYAGPAYCVGYCGNSGVMTRNANADLARTA
+UniRef90_A0A3E4UVN6/21-61            -GCVCSGSAAVASSHYAGPAYCVGYCGNHGAVTRNANYNLAK--
+UniRef90_A0AAJ1EW70/21-62            -GCICSISVAVKQSYYAGPAYCVGYCGNNGVTTRNANANLAKT-
+UniRef90_A0A7U9RUR9/28-68            -GCICSGSNTVANAHNQGPSWCVGYCE-HGDVNRHANMETAKY-
+UniRef90_A0A174TUD7/26-68            -GCVCSGPSGTAASHNKGSGWCVGYCGGETTETRHENMLNAKTA
+UniRef90_S0J2E4/25-64                -GCVCSGTVEIANSHDQGPSICNPYCA-GGTVNHNANEELAK--
+UniRef90_A0A419T9H1/28-65            -GCICSGSIEAKNAHYQGPTMCVGYCE-HGIDNRNANMEQ----
+UniRef90_R9ITH4/27-66                -GCVCSDTEELANAHNKGPTKCVGYCL-YGEENKNANMEAAK--
+#=GC RF                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+//

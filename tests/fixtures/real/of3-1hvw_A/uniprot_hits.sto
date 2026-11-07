@@ -1,0 +1,100 @@
+# STOCKHOLM 1.0
+
+#=GS tr|A0A2V0NQJ4|A0A2V0NQJ4_9CHLO/492-509 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_02642 PE=4 SV=1
+#=GS tr|A0A2V0P4X8|A0A2V0P4X8_9CHLO/232-249 DE [subseq from] Ankyrin repeat domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_05330 PE=4 SV=1
+#=GS tr|A0A2V0NYT3|A0A2V0NYT3_9CHLO/325-342 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_05413 PE=4 SV=1
+#=GS tr|A0A2V0NKW8|A0A2V0NKW8_9CHLO/205-222 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_00710 PE=4 SV=1
+#=GS tr|A0A5B8MYU5|A0A5B8MYU5_9CHLO/214-233 DE [subseq from] Ankyrin repeat domain-containing protein OS=Chloropicon primus OX=1764295 GN=A3770_17p80590 PE=4 SV=1
+#=GS tr|A0A5B8MYU5|A0A5B8MYU5_9CHLO/359-376 DE [subseq from] Ankyrin repeat domain-containing protein OS=Chloropicon primus OX=1764295 GN=A3770_17p80590 PE=4 SV=1
+#=GS tr|A0A2V0PD07|A0A2V0PD07_9CHLO/372-389 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_07486 PE=4 SV=1
+#=GS tr|A0A2V0PD07|A0A2V0PD07_9CHLO/401-418 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_07486 PE=4 SV=1
+#=GS tr|A0A2V0NR19|A0A2V0NR19_9CHLO/246-263 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_00715 PE=4 SV=1
+#=GS tr|A0A2V0NL88|A0A2V0NL88_9CHLO/264-281 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_00876 PE=4 SV=1
+#=GS tr|A0A7S0S7I9|A0A7S0S7I9_9CHLO/96-115  DE [subseq from] Ankyrin repeat domain-containing protein OS=Mantoniella antarctica OX=81844 GN=MANT1106_LOCUS425 PE=4 SV=1
+#=GS sp|P81595|TO1B_HADVE/4-23              DE [subseq from] Omega-hexatoxin-Hv1b OS=Hadronyche versuta OX=6904 PE=1 SV=1
+#=GS sp|P81598|TO1E_HADVE/4-23              DE [subseq from] Omega-hexatoxin-Hv1e OS=Hadronyche versuta OX=6904 PE=1 SV=1
+#=GS sp|P56207|TO1A_HADVE/4-23              DE [subseq from] Omega-hexatoxin-Hv1a OS=Hadronyche versuta OX=6904 PE=1 SV=1
+#=GS sp|P81596|TO1C_HADVE/4-23              DE [subseq from] Omega-hexatoxin-Hv1c OS=Hadronyche versuta OX=6904 PE=1 SV=1
+#=GS sp|A5A3H5|TO1F_ATRRO/45-64             DE [subseq from] Omega-hexatoxin-Ar1f OS=Atrax robustus OX=6903 PE=2 SV=1
+#=GS sp|A5A3H3|TO1D_ATRRO/45-64             DE [subseq from] Omega-hexatoxin-Ar1d OS=Atrax robustus OX=6903 PE=2 SV=1
+#=GS sp|P81597|TO1D_HADVE/4-23              DE [subseq from] Omega-hexatoxin-Hv1d OS=Hadronyche versuta OX=6904 PE=1 SV=1
+#=GS sp|S0F1M4|TO1A_HADVN/50-69             DE [subseq from] Omega-hexatoxin-Hvn1a OS=Hadronyche venenata OX=1337083 PE=3 SV=1
+#=GS tr|A0A7S3CA10|A0A7S3CA10_9CHLO/10-29   DE [subseq from] Ankyrin repeat domain-containing protein (Fragment) OS=Chloropicon roscoffensis OX=1461544 GN=CROS1456_LOCUS2698 PE=4 SV=1
+#=GS sp|P0C2L4|TO1B_HADFO/4-23              DE [subseq from] Omega-hexatoxin-Hf1a OS=Hadronyche formidabilis OX=426499 PE=1 SV=1
+#=GS sp|P0C2L6|TO1B_HADIN/46-65             DE [subseq from] Omega-hexatoxin-Hi1b OS=Hadronyche infensa OX=153481 PE=1 SV=2
+#=GS tr|A0A2V0NRH2|A0A2V0NRH2_9CHLO/378-395 DE [subseq from] F-box domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_00875 PE=4 SV=1
+#=GS sp|S0F1N0|TO1E_HADIN/46-65             DE [subseq from] Omega-hexatoxin-Hi1e OS=Hadronyche infensa OX=153481 PE=3 SV=1
+#=GS sp|A5A3H4|TO1E_ATRRO/45-64             DE [subseq from] Omega-hexatoxin-Ar1e OS=Atrax robustus OX=6903 PE=2 SV=1
+#=GS sp|S0F204|TO1F_HADIN/46-65             DE [subseq from] Omega-hexatoxin-Hi1f OS=Hadronyche infensa OX=153481 PE=3 SV=1
+#=GS tr|S0F212|S0F212_HADVN/51-70           DE [subseq from] Omega-hexatoxin-Hvn1b_6 insecticidal toxin OS=Hadronyche venenata OX=1337083 PE=2 SV=1
+#=GS tr|S0F211|S0F211_HADVN/51-70           DE [subseq from] Omega-hexatoxin-Hvn1b_1 insecticidal toxin OS=Hadronyche venenata OX=1337083 PE=2 SV=1
+#=GS sp|S0F1N7|TO1B_HADVN/51-70             DE [subseq from] Omega-hexatoxin-Hvn1b OS=Hadronyche venenata OX=1337083 PE=3 SV=1
+#=GS tr|S0F205|S0F205_HADVN/51-70           DE [subseq from] Omega-hexatoxin-Hvn1b_2 insecticidal toxin OS=Hadronyche venenata OX=1337083 PE=2 SV=1
+#=GS tr|S0F1N1|S0F1N1_HADVN/51-70           DE [subseq from] Omega-hexatoxin-Hvn1b_3 insecticidal toxin OS=Hadronyche venenata OX=1337083 PE=2 SV=1
+#=GS sp|A5A3H2|TO1C_ATRRO/45-64             DE [subseq from] Omega-hexatoxin-Ar1c OS=Atrax robustus OX=6903 PE=2 SV=1
+#=GS sp|S0F1N6|TO1D_HADIN/46-65             DE [subseq from] Omega-hexatoxin-Hi1d OS=Hadronyche infensa OX=153481 PE=3 SV=1
+#=GS tr|A0A4Q8K4C3|A0A4Q8K4C3_HADFO/50-71   DE [subseq from] Omega-Hexatoxin-Hf1e_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A4V2H9B1|A0A4V2H9B1_HADFO/49-68   DE [subseq from] Omega-Hexatoxin-Hf1i_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A2V0P8Y4|A0A2V0P8Y4_9CHLO/417-436 DE [subseq from] Ankyrin repeat domain-containing protein OS=Raphidocelis subcapitata OX=307507 GN=Rsub_06265 PE=4 SV=1
+#=GS tr|A0A4Q8KAI5|A0A4Q8KAI5_HADFO/50-69   DE [subseq from] Omega-Hexatoxin-Hf1s_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A4Q8KAG8|A0A4Q8KAG8_HADFO/49-68   DE [subseq from] Omega-Hexatoxin-Hf1r_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A4Q8K2H9|A0A4Q8K2H9_HADFO/50-70   DE [subseq from] Omega-Hexatoxin-Hf1f_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A9N8HR76|A0A9N8HR76_9STRA/188-205 DE [subseq from] Ankyrin repeat protein OS=Seminavis robusta OX=568900 GN=SEMRO_1365_G266550.1 PE=4 SV=1
+#=GS tr|A0A4Q8K318|A0A4Q8K318_HADFO/49-68   DE [subseq from] Omega-Hexatoxin-Hf1h_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A4Q8K7K5|A0A4Q8K7K5_HADFO/49-68   DE [subseq from] Omega-Hexatoxin-Hf1l_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A4Q8K8A1|A0A4Q8K8A1_HADFO/49-68   DE [subseq from] Omega-Hexatoxin-Hf1o_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A4Q8K9T6|A0A4Q8K9T6_HADFO/49-68   DE [subseq from] Omega-Hexatoxin-Hf1q_1 OS=Hadronyche formidabilis OX=426499 PE=4 SV=1
+#=GS tr|A0A955ZBJ0|A0A955ZBJ0_UNCMY/28-48   DE [subseq from] Uncharacterized protein OS=Myxococcales bacterium OX=2026763 GN=KC776_02420 PE=4 SV=1
+#=GS tr|A0A955ZBJ0|A0A955ZBJ0_UNCMY/65-85   DE [subseq from] Uncharacterized protein OS=Myxococcales bacterium OX=2026763 GN=KC776_02420 PE=4 SV=1
+#=GS tr|A0A955ZBJ0|A0A955ZBJ0_UNCMY/102-122 DE [subseq from] Uncharacterized protein OS=Myxococcales bacterium OX=2026763 GN=KC776_02420 PE=4 SV=1
+
+1hvw_1|A|A|PROTEIN                             CIPSGQPCPYNENCCSQSCTGGRCD
+tr|A0A2V0NQJ4|A0A2V0NQJ4_9CHLO/492-509         -----PPCPWNEDTCSEAARGGH--
+tr|A0A2V0P4X8|A0A2V0P4X8_9CHLO/232-249         -----PPCPWNEDTCSNAARGGH--
+tr|A0A2V0NYT3|A0A2V0NYT3_9CHLO/325-342         -----PPCPWNEETCSEAAKGGR--
+tr|A0A2V0NKW8|A0A2V0NKW8_9CHLO/205-222         -----PPCPWNENTCSNAANGGH--
+tr|A0A5B8MYU5|A0A5B8MYU5_9CHLO/214-233         -----PPCPWNENTCGEAAKAGRLD
+tr|A0A5B8MYU5|A0A5B8MYU5_9CHLO/359-376         -----PPCPWNESTCDSACRGGH--
+tr|A0A2V0PD07|A0A2V0PD07_9CHLO/372-389         -----PPCPWDENTCAEAAAGGH--
+tr|A0A2V0PD07|A0A2V0PD07_9CHLO/401-418         -----PPCPWDENTCAEAAAGGH--
+tr|A0A2V0NR19|A0A2V0NR19_9CHLO/246-263         -----PPCPWDENTCKEAAAGGH--
+tr|A0A2V0NL88|A0A2V0NL88_9CHLO/264-281         -----PPCPWNERTCSAAAEGGR--
+tr|A0A7S0S7I9|A0A7S0S7I9_9CHLO/96-115          -----PPCPWNETTCAMAALGGQID
+sp|P81595|TO1B_HADVE/4-23                      CIPSGQPCPYNENCCSQSCT-----
+sp|P81598|TO1E_HADVE/4-23                      CIPSGQPCPYNENCCSQSCT-----
+sp|P56207|TO1A_HADVE/4-23                      CIPSGQPCPYNENCCSQSCT-----
+sp|P81596|TO1C_HADVE/4-23                      CIPSGQPCPYNENCCSQSCT-----
+sp|A5A3H5|TO1F_ATRRO/45-64                     CIPSGQPCPYNENCCSQSCT-----
+sp|A5A3H3|TO1D_ATRRO/45-64                     CIPSGQPCPYNENCCSQSCT-----
+sp|P81597|TO1D_HADVE/4-23                      CIPSGQPCPYNENCCSKSCT-----
+sp|S0F1M4|TO1A_HADVN/50-69                     CIPSGQPCPYNENCCSKSCT-----
+tr|A0A7S3CA10|A0A7S3CA10_9CHLO/10-29           -----PPCPWNEETCDRAAQGGHLD
+sp|P0C2L4|TO1B_HADFO/4-23                      CIRSGQPCPYNENCCSQSCT-----
+sp|P0C2L6|TO1B_HADIN/46-65                     CIPTGQPCPYNENCCSQSCT-----
+tr|A0A2V0NRH2|A0A2V0NRH2_9CHLO/378-395         -----PPCPWDEGTCSQAAEGGH--
+sp|S0F1N0|TO1E_HADIN/46-65                     CIPTGQPCPYNENCCSQSCT-----
+sp|A5A3H4|TO1E_ATRRO/45-64                     CIPSGQPCPYNENCCSKSCT-----
+sp|S0F204|TO1F_HADIN/46-65                     CIPTGQPCPYNENCCSQSCT-----
+tr|S0F212|S0F212_HADVN/51-70                   CIPSGQPCPYNENCCSKSCT-----
+tr|S0F211|S0F211_HADVN/51-70                   CIPSGQPCPYNENCCSKSCT-----
+sp|S0F1N7|TO1B_HADVN/51-70                     CIPSGQPCPYNENCCSKSCT-----
+tr|S0F205|S0F205_HADVN/51-70                   CIPSGQPCPYNENCCSKSCT-----
+tr|S0F1N1|S0F1N1_HADVN/51-70                   CIPSGQPCPYNENCCSKSCT-----
+sp|A5A3H2|TO1C_ATRRO/45-64                     CIPSGQPCPYNENYCSQSCT-----
+sp|S0F1N6|TO1D_HADIN/46-65                     CIPTGQPCPYNENCCNQSCT-----
+tr|A0A4Q8K4C3|A0A4Q8K4C3_HADFO/50-71           CIPTGQPCPYDENCCSKSCTSK---
+tr|A0A4V2H9B1|A0A4V2H9B1_HADFO/49-68           CIPTGQPCPYNENCCSGSCT-----
+tr|A0A2V0P8Y4|A0A2V0P8Y4_9CHLO/417-436         -----PPCPWNEGTCSAAADGGHLD
+tr|A0A4Q8KAI5|A0A4Q8KAI5_HADFO/50-69           CIPTGQPCPYNENCCSNSCT-----
+tr|A0A4Q8KAG8|A0A4Q8KAG8_HADFO/49-68           CIPTGQPCPYNENCCSGSCT-----
+tr|A0A4Q8K2H9|A0A4Q8K2H9_HADFO/50-70           CIPTGQPCPYDENCCSKSCTS----
+tr|A0A9N8HR76|A0A9N8HR76_9STRA/188-205         ------GCPWNEGTCSQAAIGGHL-
+tr|A0A4Q8K318|A0A4Q8K318_HADFO/49-68           CIPTGQPCPYNENCCSGSCT-----
+tr|A0A4Q8K7K5|A0A4Q8K7K5_HADFO/49-68           CIPTGQPCPYNENCCSSSCT-----
+tr|A0A4Q8K8A1|A0A4Q8K8A1_HADFO/49-68           CIPTGQPCPYNENCCSGSCT-----
+tr|A0A4Q8K9T6|A0A4Q8K9T6_HADFO/49-68           CIPTGQPCPYNENCCSGSCT-----
+tr|A0A955ZBJ0|A0A955ZBJ0_UNCMY/28-48           CVPEGNKCTFDSDCCSKNCVN----
+tr|A0A955ZBJ0|A0A955ZBJ0_UNCMY/65-85           CVPEGNKCTFDSDCCSKNCVN----
+tr|A0A955ZBJ0|A0A955ZBJ0_UNCMY/102-122         CIPQGRSCTFDSDCCSKNCVN----
+#=GC RF                                        xxxxxxxxxxxxxxxxxxxxxxxxx
+//
