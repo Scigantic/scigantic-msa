@@ -149,3 +149,16 @@ def test_batch_says_which_job_it_is_on(fake, tmp_path, capsys):
     assert run(str(_three(tmp_path)), "-m", "boltz", "-o", str(tmp_path / "o"), "--yes", "--batch") == 0
     err = capsys.readouterr().err
     assert "job 1 of 3: a" in err and "job 3 of 3: c" in err
+
+
+def test_python_get_names_the_empty_chain_and_refuses_bytes(fake):
+    from scigantic_msa import InvalidSequence
+
+    with pytest.raises(InvalidSequence, match="sequence 2: sequence is empty"):
+        MSA().get([Q, ""], remote=True)
+    for bad in (Q.encode(), None, {Q}):
+        with pytest.raises(TypeError, match="as a str"):
+            MSA().get(bad, remote=True)
+    with pytest.raises(InvalidSequence, match="pass a list"):
+        MSA().get(f"{Q}:{Q2}", remote=True)
+    assert fake.calls == []

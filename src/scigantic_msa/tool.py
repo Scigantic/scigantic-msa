@@ -136,6 +136,9 @@ class MSA:
         error otherwise. A cached result is used without sending anything.
         """
         single = isinstance(sequence, str)
+        if not single and (isinstance(sequence, (bytes, bytearray)) or not isinstance(sequence, (list, tuple))):
+            raise TypeError(f"pass the sequence as a str, or a list of str for a complex, "
+                            f"not {type(sequence).__name__}")
         seqs: List[str] = [sequence] if isinstance(sequence, str) else list(sequence)
         if not seqs:
             raise ValueError("no sequence given")
@@ -253,10 +256,14 @@ def protein_sequence(seq: str, i: int) -> str:
     """Canonical sequence, refusing anything that is not letters (a mistyped
     file name, say) before it can be sent. The error names only the
     offending characters."""
-    q = canonical_sequence(seq)
+    try:
+        q = canonical_sequence(seq)
+    except InvalidSequence as e:
+        raise InvalidSequence(f"sequence {i}: {e}") from None
     bad = sorted({c for c in q if not ("A" <= c <= "Z")})
     if bad:
-        raise InvalidSequence(f"sequence {i} has characters that are not amino acid letters: {''.join(bad)!r}")
+        hint = ". For a complex, pass a list with one sequence per chain" if ":" in bad else ""
+        raise InvalidSequence(f"sequence {i} has characters that are not amino acid letters: {''.join(bad)!r}{hint}")
     return q
 
 
