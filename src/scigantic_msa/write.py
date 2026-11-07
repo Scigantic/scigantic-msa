@@ -15,6 +15,7 @@ keyword. It lived inside cli.py, where only the command line could reach it.
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 from typing import List, Tuple
 
@@ -41,32 +42,38 @@ def write_model(model: str, chains: List[Alignment], out: "str | Path", name: st
         AlphaFold3.prepare(chains, name=name, out_dir=out, quiet=quiet)
         p = out / f"{_fname(name)}.json"
         flag = " --resolve_msa_overlaps=false" if len({c.query for c in chains}) > 1 else ""
-        return [str(p)], (f"python run_alphafold.py --json_path={p} --model_dir=WEIGHTS "
-                          f"--output_dir={out / 'pred'} --norun_data_pipeline{flag}")
+        return [str(p)], (f"python run_alphafold.py --json_path={_q(p)} --model_dir=WEIGHTS "
+                          f"--output_dir={_q(out / 'pred')} --norun_data_pipeline{flag}")
     if model == "boltz":
         yaml = Boltz.prepare(chains, out_dir=out / "msas", quiet=quiet)
         p = out / f"{_fname(name)}.yaml"
         p.write_text(yaml)
-        return [str(p), str(out / "msas")], f"boltz predict {p} --out_dir {out / 'pred'}"
+        return [str(p), str(out / "msas")], f"boltz predict {_q(p)} --out_dir {_q(out / 'pred')}"
     if model == "chai":
         d = Chai.prepare(chains, out_dir=out / "msas", quiet=quiet)
         p = out / f"{_fname(name)}.fasta"
         p.write_text(Chai.fasta(chains))
-        return [str(p), str(d)], f"chai-lab fold --msa-directory {d} {p} {out / 'pred'}"
+        return [str(p), str(d)], f"chai-lab fold --msa-directory {_q(d)} {_q(p)} {_q(out / 'pred')}"
     if model == "colabfold":
         p = ColabFold.prepare(chains, out_dir=out, name=_fname(name), quiet=quiet)
-        return [str(p)], f"colabfold_batch {p} {out / 'pred'}"
+        return [str(p)], f"colabfold_batch {_q(p)} {_q(out / 'pred')}"
     if model == "openfold3":
         q = OpenFold3.prepare(chains, out_dir=out / "msas", name=name, quiet=quiet)
         p = out / f"{_fname(name)}.json"
         p.write_text(json.dumps(q, indent=2) + "\n")
-        return [str(p), str(out / "msas")], f"run_openfold predict --query_json {p} --use_msa_server false --output_dir {out / 'pred'}"
+        return [str(p), str(out / "msas")], f"run_openfold predict --query_json {_q(p)} --use_msa_server false --output_dir {_q(out / 'pred')}"
     if model == "protenix":
         jobs = Protenix.prepare(chains, out_dir=out / "msas", name=name, quiet=quiet)
         p = out / f"{_fname(name)}.json"
         p.write_text(json.dumps(jobs, indent=2) + "\n")
-        return [str(p), str(out / "msas")], f"protenix pred -i {p} -o {out / 'pred'}"
+        return [str(p), str(out / "msas")], f"protenix pred -i {_q(p)} -o {_q(out / 'pred')}"
     raise ValueError(f"unknown model {model}")
+
+
+def _q(path: "str | Path") -> str:
+    """A path as one shell word, so the printed command can be pasted as is
+    when --out has spaces or quotes in it."""
+    return shlex.quote(str(path))
 
 
 def _fname(name: str) -> str:

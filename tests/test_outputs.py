@@ -50,3 +50,19 @@ def test_protenix_dimer_with_no_shared_species_gets_no_pairing_file(tmp_path):
     b = synthetic("GHSEQKLLPA", ["GHTEQKLLPA"], {0: "10090"})
     jobs = Protenix.prepare([a, b], out_dir=tmp_path, quiet=True)
     assert all("pairedMsaPath" not in s["proteinChain"] for s in jobs[0]["sequences"])
+
+
+def test_next_command_survives_a_shell_with_spaces_and_quotes_in_out(tmp_path):
+    import shlex
+
+    from scigantic_msa import write_model
+
+    a = synthetic("MKVLAGWERT", ["MRVLAGWERT"], {0: "9606"})
+    b = synthetic("GHSEQKLLPA", ["GHTEQKLLPA"], {0: "9606"})
+    out = tmp_path / "my run (v2)" / "o'k"
+    for model in ("af3", "boltz", "colabfold", "openfold3", "protenix"):
+        files, nxt = write_model(model, [a, b], out, name="job", quiet=True)
+        words = shlex.split(nxt)
+        # The input file the command names is one word that exists.
+        assert any(Path(w.split("=", 1)[-1]) == Path(files[0]) for w in words), (model, nxt)
+        assert Path(files[0]).is_file()
