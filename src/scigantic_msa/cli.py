@@ -11,6 +11,7 @@ already have and sends nothing.
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import sys
 from pathlib import Path
@@ -19,11 +20,12 @@ from typing import List, Optional, Tuple
 from . import __version__
 from .a3m import A3MError
 from .adapters import PrepareError
-from .remote import BACKENDS
+from .alignment import Alignment
+from .remote import BACKENDS, remote_disabled
 from .remote.colabfold import RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
 from .tool import MSA, RemoteNotAllowed, protein_sequence, read_alignment
-from .write import MODELS, write_model
+from .write import MODELS, _fname, write_model
 
 
 
@@ -32,34 +34,147 @@ def die(msg: str, code: int = 1) -> int:
     return code
 
 
-def read_chains(arg: str) -> Tuple[str, List[str]]:
-    """(name, chains). A FASTA with several records is one complex, one
-    chain per record. ':' inside a sequence also separates chains."""
+#: A sequence typed on the command line shorter than this is refused unless
+#: it starts with '=', because it is more likely a mistyped file name.
+MIN_LITERAL = 10
+#: Most chains in one complex, and most jobs in one --batch run.
+MAX_CHAINS = 20
+MAX_JOBS = 100
+#: Below this many sequences an alignment is called shallow.
+LOW_DEPTH = 20
+
+
+class InputError(ValueError):
+    """The run argument cannot be used as a sequence or a FASTA file."""
+
+
+def _read_text(arg: str) -> Tuple[str, bool]:
+    """(text, typed): typed is True when the argument itself is the
+    sequence and was not marked with a leading '='."""
     if arg == "-":
-        text = sys.stdin.read()
-    elif os.path.isfile(arg):
-        text = Path(arg).read_text()
-    else:
-        text = arg
-    name = "query"
-    parts: List[str] = []
+        return sys.stdin.read().lstrip("\ufeff"), False
+    if arg.startswith("="):
+        return arg[1:], False
+    if os.path.isdir(arg):
+        raise InputError(f"{arg} is a directory. Pass a FASTA file, a sequence, or - for stdin.")
+    if os.path.isfile(arg):
+        return Path(arg).read_text(encoding="utf-8-sig"), False
+    return arg, True
+
+
+def read_records(arg: str) -> List[Tuple[str, List[str]]]:
+    """[(name, chains)], one entry per FASTA record (one entry for a bare
+    sequence). ':' inside a sequence separates chains of one record."""
+    text, _ = _read_text(arg)
+    return _parse_records(text)
+
+
+def _parse_records(text: str) -> List[Tuple[str, List[str]]]:
+    recs: List[Tuple[str, List[str]]] = []
     if text.lstrip().startswith(">"):
+        name: Optional[str] = None
         cur: Optional[List[str]] = None
         for line in text.splitlines():
             if line.startswith(">"):
                 if cur is not None:
-                    parts.append("".join(cur))
-                elif line[1:].strip():
-                    name = line[1:].strip().split()[0]
+                    recs.append((name or "", cur))
+                name = line[1:].strip().split()[0] if line[1:].strip() else ""
                 cur = []
             elif cur is not None and line.strip():
                 cur.append(line.strip())
         if cur is not None:
-            parts.append("".join(cur))
+            recs.append((name or "", cur))
+        parts = [(n, "".join(c)) for n, c in recs]
     else:
-        parts.append("".join(text.split()))
-    chains = [canonical_sequence(c) for p in parts for c in p.split(":")]
-    return name, chains
+        parts = [("", "".join(text.split()))]
+    return [(n, [canonical_sequence(c) for c in p.split(":")]) for n, p in parts]
+
+
+def read_chains(arg: str) -> Tuple[str, List[str]]:
+    """(name, chains): every record's chains in order, named after the
+    first record. ':' inside a sequence also separates chains."""
+    recs = read_records(arg)
+    name = recs[0][0] if recs and recs[0][0] else "query"
+    return name, [c for _, cs in recs for c in cs]
+
+
+def _check_typed(arg: str, chains: List[str]) -> None:
+    """Refuse a typed argument that is more likely a file name than a
+    sequence. Called only when no file or directory of that name exists."""
+    if len(arg) < 200 and os.sep not in arg:
+        try:
+            near = sorted(f.name for f in Path(".").glob(glob.escape(arg) + ".*") if f.is_file())
+        except OSError:
+            near = []
+        if near:
+            raise InputError(f"there is no file named {arg!r}. Did you mean {near[0]}? "
+                             f"To send {arg!r} as a sequence, write it as ={arg}.")
+    short = min(len(c) for c in chains)
+    if short < MIN_LITERAL:
+        raise InputError(f"{arg!r} is not a file, and as a sequence it has only {short} residues. "
+                         f"To send a short sequence on purpose, write it as ={arg}.")
+
+
+def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tuple[str, List[str]]]:
+    """The jobs to run as (name, chains). Raises InputError or InvalidSequence."""
+    text, typed = _read_text(arg)
+    recs = _parse_records(text)
+    try:
+        recs = [(n, [protein_sequence(c, i) for i, c in enumerate(cs, 1)]) for n, cs in recs]
+    except InvalidSequence as e:
+        if typed:
+            raise InvalidSequence(f"{e}. No file named {arg!r} exists either.") from None
+        raise
+    if typed:
+        _check_typed(arg, [c for _, cs in recs for c in cs])
+    if len(recs) > 1 and not (complex_ or batch):
+        raise InputError(f"{arg} has {len(recs)} records. Pass --complex to fold them as one complex of "
+                         f"{len(recs)} chains, or --batch to run each record as its own job.")
+    if batch:
+        if len(recs) > MAX_JOBS:
+            raise InputError(f"{arg} has {len(recs)} records; --batch takes at most {MAX_JOBS}")
+        jobs: List[Tuple[str, List[str]]] = []
+        seen: set = set()
+        for i, (n, cs) in enumerate(recs, 1):
+            base = _fname(n or f"job{i}")
+            nm, k = base, 1
+            while nm.lower() in seen:
+                k += 1
+                nm = f"{base}_{k}"
+            seen.add(nm.lower())
+            jobs.append((nm, cs))
+    else:
+        jobs = [(name or recs[0][0] or "query", [c for _, cs in recs for c in cs])]
+    for n, cs in jobs:
+        if len(cs) > MAX_CHAINS:
+            raise InputError(f"{n} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
+    return jobs
+
+
+def _warn_nucleic(jobs: List[Tuple[str, List[str]]]) -> None:
+    for n, cs in jobs:
+        for i, c in enumerate(cs, 1):
+            if len(c) >= MIN_LITERAL and set(c) <= set("ACGTUN"):
+                what = f"chain {i}" if len(cs) > 1 else "the sequence"
+                where = f" of {n}" if len(jobs) > 1 else ""
+                print(f"warning: {what}{where} has only A, C, G, T, U and N, so it looks like DNA or RNA. "
+                      "This tool searches protein databases.", file=sys.stderr)
+
+
+def _depths(chains: List[Alignment], quiet: bool) -> None:
+    """Say how deep each chain's alignment is, and warn when it is so
+    shallow that the model will in effect run on the sequence alone."""
+    for i, c in enumerate(chains, 1):
+        what = f"chain {i}" if len(chains) > 1 else "sequence"
+        d = c.depth
+        if not quiet:
+            print(f"{what}: depth {d}", file=sys.stderr)
+        if d <= 1:
+            print(f"warning: {what} has depth 1 (the query only). The model will run in single-sequence "
+                  "mode, which is usually much less accurate.", file=sys.stderr)
+        elif d < LOW_DEPTH:
+            print(f"warning: {what} has only {d} sequences in its alignment. Predictions from a shallow "
+                  "MSA are often poor.", file=sys.stderr)
 
 
 def _report(files: List[str], nxt: str, quiet: bool) -> None:
@@ -70,10 +185,17 @@ def _report(files: List[str], nxt: str, quiet: bool) -> None:
     print(f"next: {nxt}", file=sys.stderr)
 
 
-def _confirm(tool: MSA, pending: List[str], yes: bool) -> Optional[int]:
+def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple[str, List[str]]]] = None) -> Optional[int]:
     """None to go ahead, or an exit code."""
-    lengths = ", ".join(str(len(q)) for q in pending)
     n = len(pending)
+    if n > 10:
+        lengths = f"{min(map(len, pending))} to {max(map(len, pending))}"
+    else:
+        lengths = ", ".join(str(len(q)) for q in pending)
+    if jobs and len(jobs) > 1:
+        print(f"Batch of {len(jobs)} separate jobs.", file=sys.stderr)
+    elif jobs and len(jobs[0][1]) > 1:
+        print(f"One complex of {len(jobs[0][1])} chains.", file=sys.stderr)
     print(f"This sends {n} sequence{'s' if n > 1 else ''} (length {lengths}) to {tool.describe_server()}.",
           file=sys.stderr)
     if yes:
@@ -93,28 +215,38 @@ def _confirm(tool: MSA, pending: List[str], yes: bool) -> Optional[int]:
 
 def cmd_run(a: argparse.Namespace) -> int:
     try:
-        name, chains = read_chains(a.sequence)
-        chains = [protein_sequence(c, i) for i, c in enumerate(chains, 1)]
-    except (InvalidSequence, OSError) as e:
+        jobs = _jobs(a.sequence, a.complex, a.batch, a.name)
+    except (InvalidSequence, InputError, OSError) as e:
         return die(str(e))
-    name = a.name or name
+    _warn_nucleic(jobs)
     try:
         tool = MSA(a.server, host=a.host, cache=not a.no_cache, quiet=a.quiet)
     except ValueError as e:
         return die(str(e))
-    pending = [q for q in dict.fromkeys(chains) if tool.cached(q) is None]
+    pending = [q for q in dict.fromkeys(c for _, cs in jobs for c in cs) if tool.cached(q) is None]
+    if pending and remote_disabled():
+        return die("remote search is disabled (SCIGANTIC_MSA_NO_REMOTE is set), so nothing was sent. "
+                   "Use 'scigantic-msa convert' with an alignment you already have.")
     if pending:
-        rc = _confirm(tool, pending, a.yes)
+        rc = _confirm(tool, pending, a.yes, jobs)
         if rc is not None:
             return rc
     elif not a.quiet:
         print("Every chain is in the local cache; nothing is sent.", file=sys.stderr)
+    out = Path(a.out)
     try:
-        got = tool.get(chains, remote=True)
-        files, nxt = write_model(a.model, got, Path(a.out), name, a.quiet)
+        for name, chains in jobs:
+            got = tool.get(chains, remote=True)
+            files, nxt = write_model(a.model, got, out / name if a.batch else out, name, a.quiet)
+            _report(files, nxt, a.quiet)
+            _depths(got, a.quiet)
     except (RemoteError, RemoteNotAllowed, A3MError, PrepareError, ImportError, OSError, ValueError) as e:
         return die(str(e))
-    _report(files, nxt, a.quiet)
+    except KeyboardInterrupt:
+        if pending:
+            print("Interrupted. The search may still be running on the server; run the same command "
+                  "again to pick up the same job without sending it again.", file=sys.stderr)
+        return 130
     return 0
 
 
@@ -133,6 +265,7 @@ def cmd_convert(a: argparse.Namespace) -> int:
     except (A3MError, PrepareError, InvalidSequence, ImportError, OSError, ValueError) as e:
         return die(str(e))
     _report(files, nxt, a.quiet)
+    _depths(chains, a.quiet)
     return 0
 
 
@@ -148,12 +281,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="search a server for the MSA, then write the model's input")
-    r.add_argument("sequence", help="a sequence, a FASTA file (one record per chain), or - for stdin; "
-                                    "':' separates chains of a complex")
+    r.add_argument("sequence", help="a FASTA file, - for stdin, or a sequence (start it with '=' if it is "
+                                    "shorter than 10 residues); ':' separates chains of a complex")
     r.add_argument("--model", "-m", choices=MODELS, required=True)
     r.add_argument("--out", "-o", required=True, help="output directory")
     r.add_argument("--server", choices=BACKENDS, default="colabfold", help="where the sequence is sent (default colabfold)")
     r.add_argument("--host", help="URL of another server of that kind, for example your own ColabFold server")
+    g = r.add_mutually_exclusive_group()
+    g.add_argument("--complex", action="store_true",
+                   help=f"a FASTA with several records is one complex, one chain per record (at most {MAX_CHAINS})")
+    g.add_argument("--batch", action="store_true",
+                   help=f"each FASTA record is its own job, written to its own folder under --out (at most {MAX_JOBS})")
     r.add_argument("--yes", "-y", action="store_true", help="do not ask before sending the sequence")
     r.add_argument("--no-cache", action="store_true", help="do not read or write the local cache")
     r.add_argument("--name", help="job name used for file names (default: FASTA header or 'query')")
