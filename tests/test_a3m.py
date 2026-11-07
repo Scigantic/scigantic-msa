@@ -2,7 +2,7 @@ import pytest
 
 from conftest import Q_1HVW, Q_6T33, Q_LITEFOLD, real
 from scigantic_msa.a3m import (
-    A3MError, a3m_query, format_a3m, match_length, parse_a3m, parse_colabfold_complex, parse_stockholm,
+    A3MError, format_a3m, match_length, parse_a3m, parse_colabfold_complex, parse_stockholm,
 )
 
 
@@ -25,15 +25,14 @@ def test_real_litefold_file_labels_uniref_and_env_rows():
 
 def test_uniclust_consensus_first_file_has_no_query():
     text = real("uniclust30-M4VQ73/uniclust30.a3m").decode()
-    assert a3m_query(text, "M4VQ73") is None
     with pytest.raises(A3MError, match="not a usable query row"):
         parse_a3m(text)
 
 
 def test_uniclust_query_first_file():
     text = real("uniclust30-A0A1A9ZI35/uniclust30.a3m").decode()
-    q = a3m_query(text, "A0A1A9ZI35")
-    rows = parse_a3m(text, q)
+    rows = parse_a3m(text)
+    q = rows[0].seq
     assert rows[0].seq == q and len(rows) == 200
     assert sum(1 for r in rows if r.taxid) >= 190
 

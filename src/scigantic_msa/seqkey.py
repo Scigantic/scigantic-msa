@@ -1,5 +1,4 @@
-"""The canonical sequence key shared by the index, the library and the
-Scigantic backend.
+"""The canonical form of a sequence, used for cache keys and file names.
 
 Canonical form: remove every character for which ``str.isspace()`` is true,
 uppercase, then strip one trailing ``*``. Everything else is kept as is.
@@ -36,11 +35,3 @@ def canonical_sequence(seq: str) -> str:
 
 def seq_sha256(seq: str) -> str:
     return hashlib.sha256(canonical_sequence(seq).encode("utf-8")).hexdigest()
-
-
-def is_seq_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(c in "0123456789abcdef" for c in value)
-    )

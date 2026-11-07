@@ -36,7 +36,6 @@ __all__ = [
     "format_a3m",
     "match_length",
     "ungapped",
-    "a3m_query",
     "parse_colabfold_complex",
     "classify_header",
 ]
@@ -232,35 +231,6 @@ def _first_diff(a: str, b: str) -> int:
 
 def format_a3m(rows: Sequence[Row]) -> str:
     return "".join(f">{r.header}\n{r.seq}\n" for r in rows)
-
-
-def a3m_query(text: str, expect_id: Optional[str] = None) -> Optional[str]:
-    """The index builder's query rule: first record that is not a ``_consensus``
-    record, skipping ``#`` lines. Returns None when it has gaps or lowercase,
-    or when ``expect_id`` is given and is not in the record name."""
-    name: Optional[str] = None
-    seq: List[str] = []
-    consensus = False
-    for line in text.replace("\x00", "").split("\n"):
-        if line.startswith("#"):
-            continue
-        if line.startswith(">"):
-            if name is not None and not consensus:
-                break
-            name = line[1:].lstrip(">").strip()
-            consensus = name.split()[0].endswith("_consensus") if name else False
-            seq = []
-            continue
-        if name is not None:
-            seq.append(line.strip())
-    if name is None or consensus:
-        return None
-    q = "".join(seq)
-    if not q or "-" in q or any(c.islower() for c in q):
-        return None
-    if expect_id is not None and expect_id not in name.split()[0]:
-        return None
-    return q
 
 
 # --------------------------------------------------------------------------- Stockholm
