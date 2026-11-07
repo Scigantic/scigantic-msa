@@ -13,10 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from conftest import Q_6T33, Q_7M22A, Q_7M22C, Q_LITEFOLD, key
-from scigantic_msa.assemble import load_entry
+from conftest import Q_6T33, Q_7M22A, Q_7M22C, Q_LITEFOLD, real_alignment
+from scigantic_msa.adapters import Boltz, Chai
 from scigantic_msa.pairing import pair_by_species
-from scigantic_msa.writers import write_boltz, write_chai
 
 HERE = Path(__file__).parent / "predictors"
 pytestmark = pytest.mark.predictors
@@ -37,13 +36,15 @@ def _run(python, script, *args):
 
 
 @pytest.fixture
-def chains(index_setup):
-    idx, _, _ = index_setup
-
-    def get(seq, **kw):
-        return load_entry(idx, idx.lookup(key(seq))[0], seq, **kw)
+def chains():
+    def get(seq, want_uniprot=False):
+        return real_alignment(seq, with_uniprot=want_uniprot)
 
     return get
+
+
+def _msa_paths(yaml_text):
+    return [json.loads(l.split("msa: ", 1)[1]) for l in yaml_text.splitlines() if l.strip().startswith("msa: ")]
 
 
 def test_boltz_reads_our_files(chains, tmp_path):
@@ -52,9 +53,8 @@ def test_boltz_reads_our_files(chains, tmp_path):
         pytest.skip("set SCIGANTIC_MSA_TEST_BOLTZ_PYTHON to an interpreter with boltz installed")
     mono = chains(Q_LITEFOLD)
     a, b = chains(Q_7M22A, want_uniprot=True), chains(Q_7M22C, want_uniprot=True)
-    m_line = write_boltz([mono], tmp_path / "mono")[0]
-    c_lines = write_boltz([a, b], tmp_path / "cx")
-    files = [l.split("msa: ", 1)[1] for l in [m_line] + c_lines]
+    files = _msa_paths(Boltz.prepare(mono, out_dir=tmp_path / "mono"))
+    files += _msa_paths(Boltz.prepare([a, b], out_dir=tmp_path / "cx", quiet=True))
     res = _run(py, "check_boltz.py", *files)
     # Boltz drops rows whose residues repeat; our A3M has none to drop.
     assert res[0]["n"] == len({r.seq.replace("-", "").upper() for r in mono.rows})
@@ -74,11 +74,34 @@ def test_chai_reads_and_pairs_our_files(chains, tmp_path):
         pytest.skip("set SCIGANTIC_MSA_TEST_CHAI_PYTHON to an interpreter with chai_lab installed")
     pytest.importorskip("pyarrow")
     mono = chains(Q_6T33)
-    write_chai([mono], tmp_path / "m")
+    Chai.prepare(mono, out_dir=tmp_path / "m")
     res = _run(py, "check_chai.py", tmp_path / "m", Q_6T33)[0]
     assert res["files"][0]["depth"] == mono.depth and res["files"][0]["length"] == len(Q_6T33)
     a, b = chains(Q_7M22A, want_uniprot=True), chains(Q_7M22C, want_uniprot=True)
-    write_chai([a, b], tmp_path / "c")
+    Chai.prepare([a, b], out_dir=tmp_path / "c", quiet=True)
     res = _run(py, "check_chai.py", tmp_path / "c", Q_7M22A, Q_7M22C)[0]
     assert [f["length"] for f in res["files"]] == [len(Q_7M22A), len(Q_7M22C)]
     assert res["merged_depth"] > 1
+
+
+def _live_result():
+    """The real ColabFold server result in fixtures, read offline."""
+    from conftest import FIXTURES, Q_LIVE
+    from scigantic_msa.alignment import Alignment
+    from scigantic_msa.remote.colabfold import ColabFoldClient
+
+    res = ColabFoldClient("http://127.0.0.1:9").parse_result((FIXTURES / "colabfold-live1.tar.gz").read_bytes(), Q_LIVE, "t")
+    return Alignment(query=Q_LIVE, rows=res.rows, source="remote", provenance=res.provenance)
+
+
+def test_boltz_and_chai_read_a_real_colabfold_result(tmp_path):
+    boltz_py, chai_py = _py("SCIGANTIC_MSA_TEST_BOLTZ_PYTHON"), _py("SCIGANTIC_MSA_TEST_CHAI_PYTHON")
+    if not boltz_py or not chai_py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_BOLTZ_PYTHON and SCIGANTIC_MSA_TEST_CHAI_PYTHON")
+    pytest.importorskip("pyarrow")
+    m = _live_result()
+    res = _run(boltz_py, "check_boltz.py", *_msa_paths(Boltz.prepare(m, out_dir=tmp_path / "b")))[0]
+    assert res["n"] == len({r.seq.replace("-", "").upper() for r in m.rows}) and res["n"] > 1000
+    Chai.prepare(m, out_dir=tmp_path / "c")
+    res = _run(chai_py, "check_chai.py", tmp_path / "c", m.query)[0]
+    assert res["files"][0]["length"] == len(m.query) and res["files"][0]["depth"] > 1000
