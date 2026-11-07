@@ -17,9 +17,9 @@ from __future__ import annotations
 import json
 import shlex
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
-from .adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, Protenix, _safe_name
+from .adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, PrepareError, Protenix, _protenix_letters, _safe_name
 from .alignment import Alignment
 
 #: The model names ``write_model`` accepts, same strings as ``--model``.
@@ -51,6 +51,30 @@ def write_model(model: str, chains: List[Alignment], out: "str | Path", name: st
             except OSError:
                 pass
         raise
+
+
+def check_model(model: str, sequences: Sequence[str]) -> None:
+    """Refuse what ``write_model`` would refuse for these chain sequences
+    before their alignments exist, so ``run`` can stop before it sends
+    anything: PrepareError for a sequence the model cannot read, ImportError
+    for a missing package. Writes and sends nothing."""
+    if model not in MODELS:
+        raise ValueError(f"unknown model {model}")
+    if model == "chai":
+        try:
+            import pyarrow  # noqa: F401
+            import pyarrow.parquet  # noqa: F401
+        except ImportError:
+            raise ImportError("writing Chai-1 files needs pyarrow: pip install 'scigantic-msa[chai]'") from None
+    if model == "protenix":
+        seen = set()
+        for i, q in enumerate(sequences, 1):
+            if q in seen:
+                continue
+            seen.add(q)
+            why = _protenix_letters(q)
+            if why:
+                raise PrepareError(f"chain {i}: {why}")
 
 
 def _write(model: str, chains: List[Alignment], out: Path, name: str, quiet: bool) -> Tuple[List[str], str]:
