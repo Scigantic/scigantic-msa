@@ -50,6 +50,9 @@ AF3_PROTEIN_KEYS = frozenset(
      "pairedMsa", "pairedMsaPath", "templates"}
 )
 CHAI_SOURCES = ("query", "uniprot", "uniref90", "bfd_uniclust", "mgnify")
+#: Chai-1 pairs at most this many rows, the query included
+#: (``MAX_PAIRED_DEPTH`` in chai_lab's msas/preprocess.py).
+CHAI_MAX_PAIRED = 8192
 
 
 def _atomic_write(path: Path, data: "str | bytes") -> None:
@@ -454,7 +457,8 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
         keyed: Dict[int, str] = {}
         rows = [m.rows[0]]
         if pr is not None:
-            for k, r in enumerate(pr.rows[c], 1):
+            # Pairs past Chai's cap stay in the file as unpaired rows.
+            for k, r in enumerate(pr.rows[c][:CHAI_MAX_PAIRED - 1], 1):
                 r = r or _gap_row(m, k)
                 keyed[id(r)] = str(k)
                 rows.append(r)

@@ -173,3 +173,25 @@ def test_attribution_notes_name_the_unpaired_chain(trio, tmp_path):
     (entry,) = json.loads((tmp_path / "scigantic-msa-attribution.json").read_text())["outputs"]
     notes = entry["notes"]
     assert any("chain C" in n and "not paired" in n for n in notes)
+
+
+def test_chai_pairs_no_more_than_it_reads(tmp_path):
+    """Chai pairs at most 8192 rows counting the query. The last pair used to
+    fall to unpaired, with a gap row for a chain that has no species."""
+    pq = pytest.importorskip("pyarrow.parquet")
+    n = 8200
+    aa = "ACDEFGHIKLMNPQRSTVWY"
+
+    def hit(q, k):  # n distinct rows: k in base 20 over the last four residues
+        return q[:6] + aa[k // 8000] + aa[k // 400 % 20] + aa[k // 20 % 20] + aa[k % 20]
+
+    hits = {q: [hit(q, k) for k in range(n)] for q in ("MKVLAGAERT", "GHSEQKLLPA")}
+    taxids = {i: str(1000 + i) for i in range(n)}
+    a, b = (synthetic(q, h, taxids) for q, h in hits.items())
+    c = synthetic("PPAAGGYYST", ["PPAAGGYYSA"])
+    write_chai([a, b, c], tmp_path)
+    for m in (a, b, c):
+        t = pq.read_table(tmp_path / f"{m.seq_sha256}.aligned.pqt").to_pydict()
+        assert sum(1 for k in t["pairing_key"] if k) == 8191
+    t = pq.read_table(tmp_path / f"{a.seq_sha256}.aligned.pqt").to_pydict()
+    assert len(t["sequence"]) == n + 1  # every row is still there
