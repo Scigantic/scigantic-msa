@@ -162,3 +162,22 @@ def test_python_get_names_the_empty_chain_and_refuses_bytes(fake):
     with pytest.raises(InvalidSequence, match="pass a list"):
         MSA().get(f"{Q}:{Q2}", remote=True)
     assert fake.calls == []
+
+
+def test_too_many_chains_names_the_complex_not_the_first_record(fake, tmp_path, capsys):
+    f = tmp_path / "x.fasta"
+    f.write_text("".join(f">rec{i}\n{Q}\n" for i in range(21)))
+    assert run(str(f), "-m", "boltz", "-o", str(tmp_path / "o"), "--yes", "--complex") == 1
+    err = capsys.readouterr().err
+    assert "the complex has 21 chains" in err and "rec0" not in err
+    assert fake.calls == []
+
+
+def test_public_server_batch_says_how_long_it_takes(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("SCIGANTIC_MSA_COLABFOLD_URL", raising=False)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    # No --yes and no terminal: it stops after saying what it would send.
+    assert run(str(_three(tmp_path)), "-m", "boltz", "-o", str(tmp_path / "o"), "--batch") == 2
+    assert "at least 3 minutes" in capsys.readouterr().err
+    assert run(Q, "-m", "boltz", "-o", str(tmp_path / "o")) == 2
+    assert "minutes" not in capsys.readouterr().err

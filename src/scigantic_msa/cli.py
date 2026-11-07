@@ -24,7 +24,7 @@ from .alignment import Alignment
 from .remote import BACKENDS, remote_disabled
 from .remote.colabfold import JobFailed, RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
-from .tool import MSA, RemoteNotAllowed, read_alignment
+from .tool import MSA, RemoteNotAllowed, _is_default_host, read_alignment
 from .write import MODELS, _fname, write_model
 
 
@@ -184,7 +184,8 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
         jobs = [(name or recs[0][0] or "query", [c for _, cs in recs for c in cs])]
     for n, cs in jobs:
         if len(cs) > MAX_CHAINS:
-            raise InputError(f"{n} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
+            what = f"record {n}" if batch else "the complex"
+            raise InputError(f"{what} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
     return jobs
 
 
@@ -247,6 +248,9 @@ def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple
         print(f"One complex of {len(jobs[0][1])} chains.", file=sys.stderr)
     print(f"This sends {n} sequence{'s' if n > 1 else ''} (length {lengths}) to {tool.describe_server()}.",
           file=sys.stderr)
+    if n > 1 and tool.server == "colabfold" and _is_default_host(tool.backend):
+        print(f"The public server takes about one new job per minute, so this takes at least {n} minutes.",
+              file=sys.stderr)
     if yes:
         return None
     if not sys.stdin.isatty():
