@@ -1,41 +1,57 @@
 # Changelog
 
-## 0.2.4 (unreleased)
+## 0.2.4
 
 Changes you may notice:
 
+- A complex with a chain that has no species information (environmental or
+  clustered hits only) keeps pairing for the other chains with AlphaFold 3,
+  Boltz, Chai-1, ColabFold and OpenFold3. Before, they silently lost all
+  pairing. Each model gets the species-less chain in the form its own code
+  expects, and the notice names that chain.
+- Pairing notices name chains by id (`chain C`), not by their position
+  among the distinct sequences (`chain(s) 3`). `Pairing.rows` holds `None`
+  for every row of a chain without species, and `pair_by_species` takes
+  `names=` for its message.
 - `scigantic-msa-attribution.json` keeps one entry per write under
-  `outputs`, and `sources` lists every distinct credit. Before, the last
-  write into a folder replaced the file, so two models or jobs written
-  there from Python, or a second `convert` or `run` with another `--name`
-  into the same `--out`, lost the earlier credit. A write replaces an older
-  entry only when it rewrote all of that entry's files. A file from 0.2.3
-  is kept as the first entry. The old top-level `chains`, `files` and
-  `notes` keys are now inside each entry.
+  `outputs`, and `sources` lists every distinct credit. Before, a second
+  write into the same folder (two models from Python, or a second `convert`
+  or `run` with another `--name`) replaced the earlier credit. The top-level
+  `chains`, `files` and `notes` keys are now inside each entry. A file from
+  0.2.3 is kept as the first entry.
 - `--name` with `--batch` is a prefix for every job: `--name run1` writes
-  `<out>/run1_<record>/<model>/` and names the job `run1_<record>` in every
-  model's files. Before, it was ignored.
+  `<out>/run1_<record>/<model>/`. Before, it was ignored.
+- `SCIGANTIC_MSA_NO_REMOTE` blocks on any value but `0`, `false`, `no` or
+  `off`. Before, `on` or `y` still sent the sequence.
+- Any spelling of the public server's URL (another case, `:443`, a trailing
+  slash, spaces, or `http://`) is the public server, reached over https, and
+  gets its warning. `--host` refuses a URL with a space, query or fragment.
+- One `run` sends at most 100 new sequences to the public server.
+- Protenix: a protein letter other than the 20 standard amino acids and `X`
+  (`U`, `B`, `Z`, `J`, `O`) is refused before any file is written, and
+  `Protenix.check` reports it. Protenix 2.0.0 stops on it with `KeyError`.
+- Job names in file names are cut to 200 bytes, not 100 characters, and
+  Windows reserved names (`CON`, `nul.txt`) get a `_` in front.
 
 Fixes:
 
 - `scigantic-msa --version` works, as well as `scigantic-msa version`.
-
-Merged, to sort:
-
-- Protenix: a protein sequence with a letter other than the 20 standard
-  amino acids and `X` (such as `U`, `B`, `Z`, `J` or `O`) is refused before
-  any file is written, and `Protenix.check` reports it. Protenix 2.0.0 stops
-  on such a letter with `KeyError`.
+- Parallel `Chai.prepare` calls into one folder no longer fail or leave a
+  corrupt parquet file.
+- Chai-1 gets at most 8191 paired rows, the most it reads besides the query.
+- `run` checks the model's folders under `--out`, and each job's folder in a
+  batch, before sending anything.
+- `--server nvidia` without `NVIDIA_API_KEY` stops before asking to send.
+- A result download that is not a tar.gz fails only that job of a batch.
+- The 10-residue error no longer echoes a long sequence.
+- Depth warnings in a batch name the job.
+- `write_model` with `name=""` returns the files it wrote.
+- `convert --uniprot ""` is refused instead of ignored.
+- A model that refuses the input leaves no empty folders behind.
+- The time estimate for the public server says "or more", and lengths that
+  are all equal read "length 60 each".
 - Tests: an opt-in test runs Protenix's own JSON parser and MSA
   featurisation on the files, with `SCIGANTIC_MSA_TEST_PROTENIX_PYTHON`.
-- A complex with a chain that has no species information (environmental or
-  clustered hits only) keeps pairing for the other chains with AlphaFold 3,
-  Boltz, Chai-1, ColabFold and OpenFold3. Before, only Protenix did; the
-  others silently lost all pairing. The notice names the unpaired chain.
-- Pairing notices name chains by id (`chain C`), not by their position
-  among the distinct sequences (`chain(s) 3`).
-- `Pairing.rows` holds `None` for every row of a chain without species
-  information. `pair_by_species` takes `names=` for its message.
 
 ## 0.2.3
 
