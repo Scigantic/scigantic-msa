@@ -66,6 +66,33 @@ on them.
 
 ## Python
 
+### One call, any model
+
+```python
+from scigantic_msa import MSA, write_model
+
+chains = [MSA().from_a3m("my_alignment.a3m")]
+files, next_command = write_model("boltz", chains, out_dir, name="job")
+```
+
+`write_model` takes the same model names as `--model`
+(`af3`, `boltz`, `chai`, `colabfold`, `openfold3`, `protenix`), writes the
+files, and returns the paths it wrote plus the command to run next. Use it
+unless you need an adapter's return value directly: the adapters do not share
+a signature.
+
+| Adapter | `out_dir` | `name` | returns |
+|---|---|---|---|
+| `AlphaFold3` | optional | yes | `dict` |
+| `Boltz` | **required** | no | `str` (YAML) |
+| `Chai` | **required** | no | `Path` |
+| `ColabFold` | **required** | yes | `Path` |
+| `OpenFold3` | **required** | yes | `dict` |
+| `Protenix` | **required** | yes | `list[dict]` |
+
+### Adapters directly
+
+
 Every adapter takes one result, or a list of results for the chains of a
 complex. The result carries its sequence; if you also pass the sequence,
 it must match.

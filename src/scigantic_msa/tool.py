@@ -192,7 +192,26 @@ def read_alignment(a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] 
     if isinstance(a3m, os.PathLike) or (isinstance(a3m, str) and "\n" not in a3m and not a3m.lstrip().startswith(">")):
         p = Path(a3m)
         if not p.is_file():
-            raise FileNotFoundError(f"{p} does not exist")
+            # A str reaches here when it has no newline and does not start
+            # with ">", which is the only way to tell "a path" from "A3M
+            # text". Say which branch was taken and why, because the obvious
+            # reading of a FileNotFoundError is that the caller mistyped a
+            # path, and for a short or empty string the caller passed content.
+            # Path("") is ".", so the old message claimed the working
+            # directory did not exist.
+            what = f"{a3m!r}" if isinstance(a3m, str) else str(p)
+            if isinstance(a3m, str) and not a3m.strip():
+                raise A3MError(
+                    "from_a3m was given an empty string. Pass A3M text "
+                    "(starting with '>') or a path to a file."
+                )
+            if p.is_dir():
+                raise A3MError(f"{p} is a directory, not an alignment file")
+            raise FileNotFoundError(
+                f"{what} was read as a file path, because it has no newline "
+                "and does not start with '>', and no such file exists. If "
+                "that was meant to be A3M text, it is missing its '>' header."
+            )
         name = p.name
         raw = p.read_bytes()
         if raw[:2] == b"\x1f\x8b":

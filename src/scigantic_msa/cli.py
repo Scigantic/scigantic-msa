@@ -11,7 +11,6 @@ already have and sends nothing.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -19,14 +18,13 @@ from typing import List, Optional, Tuple
 
 from . import __version__
 from .a3m import A3MError
-from .adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, PrepareError, Protenix
-from .alignment import Alignment
+from .adapters import PrepareError
 from .remote import BACKENDS
 from .remote.colabfold import RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
 from .tool import MSA, RemoteNotAllowed, protein_sequence, read_alignment
+from .write import MODELS, write_model
 
-MODELS = ("af3", "boltz", "chai", "colabfold", "openfold3", "protenix")
 
 
 def die(msg: str, code: int = 1) -> int:
@@ -62,46 +60,6 @@ def read_chains(arg: str) -> Tuple[str, List[str]]:
         parts.append("".join(text.split()))
     chains = [canonical_sequence(c) for p in parts for c in p.split(":")]
     return name, chains
-
-
-def write_model(model: str, chains: List[Alignment], out: Path, name: str, quiet: bool) -> Tuple[List[str], str]:
-    """Write the input for one model. Returns (files written, next command)."""
-    out.mkdir(parents=True, exist_ok=True)
-    if model == "af3":
-        AlphaFold3.prepare(chains, name=name, out_dir=out, quiet=quiet)
-        p = out / f"{_fname(name)}.json"
-        flag = " --resolve_msa_overlaps=false" if len({c.query for c in chains}) > 1 else ""
-        return [str(p)], (f"python run_alphafold.py --json_path={p} --model_dir=WEIGHTS "
-                          f"--output_dir={out / 'pred'} --norun_data_pipeline{flag}")
-    if model == "boltz":
-        yaml = Boltz.prepare(chains, out_dir=out / "msas", quiet=quiet)
-        p = out / f"{_fname(name)}.yaml"
-        p.write_text(yaml)
-        return [str(p), str(out / "msas")], f"boltz predict {p} --out_dir {out / 'pred'}"
-    if model == "chai":
-        d = Chai.prepare(chains, out_dir=out / "msas", quiet=quiet)
-        p = out / f"{_fname(name)}.fasta"
-        p.write_text(Chai.fasta(chains))
-        return [str(p), str(d)], f"chai-lab fold --msa-directory {d} {p} {out / 'pred'}"
-    if model == "colabfold":
-        p = ColabFold.prepare(chains, out_dir=out, name=_fname(name), quiet=quiet)
-        return [str(p)], f"colabfold_batch {p} {out / 'pred'}"
-    if model == "openfold3":
-        q = OpenFold3.prepare(chains, out_dir=out / "msas", name=name, quiet=quiet)
-        p = out / f"{_fname(name)}.json"
-        p.write_text(json.dumps(q, indent=2) + "\n")
-        return [str(p), str(out / "msas")], f"run_openfold predict --query_json {p} --use_msa_server false --output_dir {out / 'pred'}"
-    if model == "protenix":
-        jobs = Protenix.prepare(chains, out_dir=out / "msas", name=name, quiet=quiet)
-        p = out / f"{_fname(name)}.json"
-        p.write_text(json.dumps(jobs, indent=2) + "\n")
-        return [str(p), str(out / "msas")], f"protenix pred -i {p} -o {out / 'pred'}"
-    raise ValueError(f"unknown model {model}")
-
-
-def _fname(name: str) -> str:
-    s = "".join(c if c.isalnum() or c in "-_." else "_" for c in name).strip(".")
-    return s[:100] or "query"
 
 
 def _report(files: List[str], nxt: str, quiet: bool) -> None:

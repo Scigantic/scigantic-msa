@@ -15,8 +15,11 @@ from .a3m import A3MError, Row, parse_a3m, parse_stockholm  # noqa: E402
 from .alignment import Alignment, SOURCES  # noqa: E402
 from .remote import ColabFoldClient, NvidiaClient, RemoteError  # noqa: E402
 from .tool import MSA, RemoteNotAllowed  # noqa: E402
+from .write import MODELS, write_model
 
 __all__ = [
+    "write_model",
+    "MODELS",
     "__version__",
     "MSA", "Alignment", "SOURCES", "RemoteNotAllowed", "RemoteError",
     "seq_sha256", "canonical_sequence", "InvalidSequence",

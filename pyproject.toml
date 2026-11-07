@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scigantic-msa"
-version = "0.2.0"
+version = "0.2.1"
 description = "Get a protein MSA once from the ColabFold MMseqs2 server, or bring your own A3M, and write the input files for AlphaFold 3, Boltz, Chai-1, ColabFold, OpenFold3 or Protenix."
 readme = "README.md"
 requires-python = ">=3.10"
