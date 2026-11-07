@@ -1,4 +1,4 @@
-"""scigantic-msa: protein MSAs from published sets, your account, or a search
+"""scigantic-msa: protein MSAs from published sets or a search
 server, written in the input format each structure predictor reads.
 
     from scigantic_msa import get_msa
@@ -14,7 +14,6 @@ from .a3m import A3MError, Row, parse_a3m, parse_stockholm  # noqa: E402
 from .msa import MSA, SOURCES  # noqa: E402
 from .index import Index, IndexIntegrityError, IndexUnavailable, DEFAULT_INDEX_URL  # noqa: E402
 from .core import Complex, MSANotFound, get_msa, get_msas, where  # noqa: E402
-from .account import AccountClient, AccountError, NotLoggedIn  # noqa: E402
 from .remote import ColabFoldClient, NvidiaClient, RemoteError  # noqa: E402
 
 __all__ = [
@@ -23,6 +22,5 @@ __all__ = [
     "seq_sha256", "canonical_sequence", "InvalidSequence",
     "parse_a3m", "parse_stockholm", "Row", "A3MError",
     "Index", "IndexIntegrityError", "IndexUnavailable", "DEFAULT_INDEX_URL",
-    "AccountClient", "AccountError", "NotLoggedIn",
     "ColabFoldClient", "NvidiaClient", "RemoteError",
 ]

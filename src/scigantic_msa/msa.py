@@ -14,7 +14,7 @@ from .seqkey import canonical_sequence, seq_sha256
 __all__ = ["MSA", "SOURCES", "classify_header", "species_key"]
 
 #: Where a result came from. Every MSA has exactly one of these in ``.source``.
-SOURCES = ("exact", "near", "remote", "cache", "account")
+SOURCES = ("exact", "near", "remote", "cache")
 
 _TAXID = re.compile(r"(?:\bTaxID=|\bOX=)(\d+)")
 _UNIREF_N = re.compile(r"\bn=(\d+)\b")
@@ -54,7 +54,7 @@ class MSA:
     rows: unpaired alignment rows, query first.
     uniprot_rows: optional UniProt hits (query first) whose headers carry the
         species, used only for pairing chains of a complex.
-    source: one of exact, near, remote, cache, account.
+    source: one of exact, near, remote, cache.
     provenance: what produced it (index entry, server, mode, databases, dates).
     attribution: sources and licenses to credit.
     derived: set when the rows were copied from a near-identical parent
@@ -69,7 +69,6 @@ class MSA:
     uniprot_rows: Optional[List[Row]] = None
     derived: Optional[Dict[str, Any]] = None
     templates: Optional[Dict[str, Any]] = None
-    account_id: Optional[str] = None
     #: Local cache file this result was written to, if any.
     cache_path: Optional[str] = field(default=None, repr=False, compare=False)
 
@@ -168,17 +167,9 @@ class MSA:
 
         return write_openfold3([self], directory)[0]
 
-    def save(self, *, label: Optional[str] = None, client: Any = None) -> str:
-        """Store this alignment in your Scigantic account (private). Returns the
-        alignment id."""
-        from .account import AccountClient
-
-        c = client or AccountClient()
-        return c.save(self, label=label)
-
     # ------------------------------------------------------------------ storage form
     def to_bundle(self) -> bytes:
-        """The form used for the local cache and account storage: gzip of an
+        """The form used for the local cache: gzip of an
         A3M whose first line is a '#scigantic-msa' JSON line."""
         meta = {
             "v": 1,
@@ -194,9 +185,7 @@ class MSA:
         text += format_a3m(self.rows)
         if self.uniprot_rows:
             text += format_a3m(self.uniprot_rows[1:])
-        # The taxid map goes last. The API checks the query record in the
-        # first 256 KiB of the stored file, and a deep MSA's map can be
-        # larger than that.
+        # The taxid map goes last, after the rows.
         if taxids:
             text += _TAXIDS_LINE + json.dumps(taxids, separators=(",", ":"), sort_keys=True) + "\n"
         return gzip.compress(text.encode("utf-8"), 6, mtime=0)

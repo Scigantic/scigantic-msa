@@ -3,13 +3,11 @@
 Order of lookups for one sequence:
 
 1. cache: alignments this machine computed or downloaded before.
-2. account: your stored alignments, when you are signed in. Only the hash
-   of the sequence is sent.
-3. exact: the public index of published MSAs. Only the first three hex
+2. exact: the public index of published MSAs. Only the first three hex
    digits of the hash reach the index host.
-4. near: a near-identical indexed sequence (point mutant or small indel),
+3. near: a near-identical indexed sequence (point mutant or small indel),
    searched on this machine. Rows are rebuilt for your query and labelled.
-5. remote: a search server, only when you turned one on. The sequence is
+4. remote: a search server, only when you turned one on. The sequence is
    sent to that server.
 
 ``where`` walks the same steps without computing or sending anything.
@@ -20,13 +18,11 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .a3m import A3MError
-from .account import AccountClient, AccountError, NotLoggedIn, load_config
 from .assemble import EntryUnusable, load_entry, order_entries
-from .cache import AlignmentCache, atomic_write
+from .cache import AlignmentCache
 from .index import Index, IndexIntegrityError, IndexUnavailable
 from .msa import MSA
 from .near import find_near, remap_rows
@@ -65,12 +61,12 @@ def resolve_remote(remote: RemoteArg) -> Optional[Any]:
     if remote_disabled() or remote is False:
         return None
     if remote is None:
-        name = os.environ.get("SCIGANTIC_MSA_REMOTE") or load_config().get("remote")
+        name = os.environ.get("SCIGANTIC_MSA_REMOTE")
         if not name or str(name).lower() in ("off", "none", "false", "0"):
             return None
         return make_backend(str(name).lower())
     if remote is True:
-        name = os.environ.get("SCIGANTIC_MSA_REMOTE") or load_config().get("remote") or "colabfold"
+        name = os.environ.get("SCIGANTIC_MSA_REMOTE") or "colabfold"
         if str(name).lower() in ("off", "none", "false", "0"):
             name = "colabfold"
         return make_backend(str(name).lower())
@@ -95,7 +91,6 @@ def _resolve(
     remote: RemoteArg,
     near: bool,
     index: Union[Index, None, bool],
-    account: Union[AccountClient, None, bool],
     cache: Union[AlignmentCache, None, bool],
     purpose: str,
     want_uniprot: bool,
@@ -120,38 +115,6 @@ def _resolve(
         steps.append(Step("cache", "miss", str(ac.root)))
     else:
         steps.append(Step("cache", "skipped", "cache=False"))
-
-    # 2. account
-    acct: Optional[AccountClient] = None
-    if account is not False:
-        acct = account if isinstance(account, AccountClient) else AccountClient()
-        if acct.logged_in:
-            try:
-                found = acct.lookup([sha]).get(sha) or []
-            except AccountError as e:
-                steps.append(Step("account", "error", e.message))
-            else:
-                ready = [a for a in found if a.get("status", "ready") == "ready" and a.get("format", "a3m") == "a3m"]
-                if ready:
-                    rec = sorted(ready, key=lambda a: str(a.get("createdAt", "")), reverse=True)[0]
-                    if dry_run:
-                        steps.append(Step("account", "hit", f"alignment {rec['alignmentId']} ({len(ready)} stored)"))
-                        return None, steps
-                    try:
-                        msa = acct.download(rec["alignmentId"], query=q)
-                    except (AccountError, A3MError) as e:
-                        steps.append(Step("account", "error", f"{rec['alignmentId']}: {e}"))
-                    else:
-                        steps.append(Step("account", "hit", f"alignment {rec['alignmentId']}"))
-                        if ac is not None:
-                            msa.cache_path = str(ac.put(msa, "account", rec["alignmentId"]))
-                        return msa, steps
-                else:
-                    steps.append(Step("account", "miss", f"signed in via {acct.auth_method()}"))
-        else:
-            steps.append(Step("account", "skipped", "not signed in"))
-    else:
-        steps.append(Step("account", "skipped", "account=False"))
 
     # 3. exact index match
     idx: Optional[Index] = None
@@ -268,11 +231,8 @@ def get_msa(
     sequence: str,
     *,
     remote: RemoteArg = None,
-    save: Optional[bool] = None,
-    label: Optional[str] = None,
     near: bool = True,
     index: Union[Index, None, bool] = None,
-    account: Union[AccountClient, None, bool] = None,
     cache: Union[AlignmentCache, None, bool] = None,
     purpose: str = "a3m",
     want_uniprot: bool = False,
@@ -285,24 +245,15 @@ def get_msa(
 
     remote: None uses SCIGANTIC_MSA_REMOTE or the config (off by default);
         True uses colabfold; "colabfold" or "nvidia" picks one; False never.
-    save: True stores the result in your Scigantic account (private). None
-        follows the config setting autoSave, which is off unless you set it.
     purpose: "af3" picks the files AlphaFold 3 benefits from; anything else
         picks a single A3M.
 
     The result's ``.source`` says where it came from: exact, near, remote,
-    cache or account. A ``near`` result's ``.derived`` names the parent.
+    or cache. A ``near`` result's ``.derived`` names the parent.
     """
-    if save is None:
-        save = bool(load_config().get("autoSave"))
-    acct_obj = account if isinstance(account, AccountClient) else None
-    if save:
-        acct_obj = acct_obj or AccountClient()
-        if not acct_obj.logged_in:
-            raise NotLoggedIn("save=True needs a Scigantic sign-in. Run: scigantic-msa login --email you@example.org")
     msa, steps = _resolve(
         sequence, remote=remote, near=near, index=index,
-        account=acct_obj if acct_obj is not None else account, cache=cache,
+        cache=cache,
         purpose=purpose, want_uniprot=want_uniprot, min_identity=min_identity,
         max_length_diff=max_length_diff, near_method=near_method, dry_run=False, quiet=quiet,
     )
@@ -317,48 +268,14 @@ def get_msa(
                     "where results are readable by anyone who knows the sequence).")
         raise MSANotFound(f"no MSA for sequence {seq_sha256(sequence)[:12]}: {tried}.{hint}", steps)
     _print(msa.summary(), quiet)
-    if save and msa.source != "account":
-        assert acct_obj is not None
-        prior = msa.provenance.get("account_alignment_id")
-        if prior and _still_stored(acct_obj, msa.seq_sha256, str(prior)):
-            # A cached copy of something already in the account: do not
-            # upload it again (each upload counts toward the per-sequence limit).
-            msa.account_id = str(prior)
-            _print(f"already in your Scigantic account as {prior} (private)", quiet)
-        else:
-            aid = acct_obj.save(msa, label=label)
-            msa.account_id = aid
-            _remember_saved(msa, aid)
-            _print(f"saved to your Scigantic account as {aid} (private)", quiet)
     return msa
-
-
-def _still_stored(acct: AccountClient, sha: str, alignment_id: str) -> bool:
-    try:
-        found = acct.lookup([sha]).get(sha) or []
-    except AccountError:
-        return False
-    return any(a.get("alignmentId") == alignment_id and a.get("status", "ready") == "ready" for a in found)
-
-
-def _remember_saved(msa: MSA, alignment_id: str) -> None:
-    """Note the account id in the cached copy, so a later cache hit with
-    save=True does not upload the same alignment again."""
-    path = msa.cache_path or msa.provenance.get("cache_file")
-    if not path:
-        return
-    msa.provenance["account_alignment_id"] = alignment_id
-    try:
-        atomic_write(Path(path), msa.to_bundle(), mode=0o600)
-    except OSError as e:
-        log.warning("could not update the cached copy %s: %s", path, e)
 
 
 def where(sequence: str, **kw: Any) -> List[Step]:
     """Explain which source would answer and why, without computing or
     sending the sequence anywhere."""
     kw.setdefault("remote", None)
-    for k, v in (("near", True), ("index", None), ("account", None), ("cache", None), ("purpose", "a3m"),
+    for k, v in (("near", True), ("index", None), ("cache", None), ("purpose", "a3m"),
                  ("want_uniprot", False), ("min_identity", 0.95), ("max_length_diff", 5), ("near_method", "auto")):
         kw.setdefault(k, v)
     _, steps = _resolve(sequence, dry_run=True, quiet=True, **kw)

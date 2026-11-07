@@ -1,11 +1,9 @@
-import gzip
 import io
 import json
 
 import pytest
 
 from conftest import Q_6T33, Q_7M22A, Q_7M22C, Q_LIVE
-from fake_backend import CODE, FakeBackend
 from test_colabfold import FakeColabFold
 from scigantic_msa.a3m import parse_a3m
 from scigantic_msa.cli import main, read_jobs
@@ -16,7 +14,6 @@ def env(index_setup, server, monkeypatch):
     _, base, _ = index_setup
     monkeypatch.setenv("SCIGANTIC_MSA_INDEX_URL", base)
     monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", server.url)
-    monkeypatch.setenv("SCIGANTIC_API_URL", server.url)
     return server
 
 
@@ -72,15 +69,6 @@ def test_get_with_explicit_remote(env, capsys):
     assert parse_a3m(capsys.readouterr().out, Q_LIVE)
 
 
-def test_no_remote_beats_config(env, capsys):
-    from scigantic_msa.account import save_config
-
-    FakeColabFold(env, ["COMPLETE"])
-    save_config({"remote": "colabfold"})
-    assert main(["get", Q_LIVE, "--no-remote", "-q"]) == 1
-    assert env.count(lambda r: r.path.startswith("/ticket")) == 0
-
-
 def test_where(env, capsys):
     assert main(["where", Q_6T33]) == 0
     out = capsys.readouterr().out
@@ -89,48 +77,7 @@ def test_where(env, capsys):
     assert "nothing would answer" in capsys.readouterr().out
 
 
-def test_login_new_account_and_account_commands(env, capsys, tmp_path):
-    FakeBackend(env)
-    assert main(["login", "--email", "new@lab.edu", "--code", CODE, "--accept-terms"]) == 0
-    out = capsys.readouterr().out
-    assert "Logged in as new@lab.edu" in out and "account is ready" in out
-    a3m = tmp_path / "x.a3m"
-    a3m.write_text(f">q\n{Q_6T33}\n>h\n{Q_6T33[:-1]}A\n")
-    assert main(["push", str(a3m), "--label", "mine"]) == 0
-    aid = capsys.readouterr().out.split(" as ", 1)[1].split()[0]
-    assert main(["list"]) == 0
-    assert aid in capsys.readouterr().out
-    assert main(["pull", aid, "-o", str(tmp_path / "back.a3m")]) == 0
-    assert parse_a3m((tmp_path / "back.a3m").read_text(), Q_6T33)[1].seq == Q_6T33[:-1] + "A"
-    assert main(["account"]) == 0
-    assert "1 alignments" in capsys.readouterr().out
-    assert main(["rm", aid]) == 0
-    assert main(["list"]) == 0
-    assert "No stored alignments" in capsys.readouterr().out
-    assert main(["logout"]) == 0
-    assert main(["list"]) == 1
-
-
-def test_login_new_account_without_terms_flag_non_tty(env, capsys, monkeypatch):
-    FakeBackend(env)
-    monkeypatch.setattr("sys.stdin", io.StringIO(""))
-    assert main(["login", "--email", "new@lab.edu", "--code", CODE]) == 1
-    assert "--accept-terms" in capsys.readouterr().err
-
-
-def test_push_checks_the_sequence(env, tmp_path, capsys):
-    FakeBackend(env)
-    a3m = tmp_path / "x.a3m"
-    a3m.write_text(f">q\n{Q_6T33}\n")
-    assert main(["push", str(a3m), "--seq", Q_LIVE]) == 1
-    assert "does not match" in capsys.readouterr().err
-
-
-def test_config_and_version(capsys):
-    assert main(["config", "set", "remote", "colabfold"]) == 0
-    assert main(["config", "show"]) == 0
-    assert '"remote": "colabfold"' in capsys.readouterr().out
-    assert main(["config", "set", "remote", "elsewhere"]) == 1
+def test_version(capsys):
     assert main(["version"]) == 0
     assert capsys.readouterr().out.startswith("scigantic-msa 0.1.0")
 
@@ -140,23 +87,3 @@ def test_index_info(env, capsys):
     assert "test-build-1" in capsys.readouterr().out
 
 
-def test_push_a_gzipped_a3m(env, tmp_path, capsys):
-    fb = FakeBackend(env)
-    assert main(["login", "--email", "old@lab.edu", "--code", CODE]) == 0
-    f = tmp_path / "x.a3m.gz"
-    f.write_bytes(gzip.compress(f">q\n{Q_6T33}\n>h\n{Q_6T33[:-1]}A\n".encode()))
-    assert main(["push", str(f)]) == 0
-    assert "stored" in capsys.readouterr().out and len(fb.items) == 1
-    bad = tmp_path / "bad.a3m.gz"
-    bad.write_bytes(gzip.compress(b">q\nMKV\n")[:-6])
-    assert main(["push", str(bad)]) == 1
-    assert "gzip" in capsys.readouterr().err
-
-
-def test_commands_report_an_unreachable_api_without_a_traceback(capsys, monkeypatch):
-    monkeypatch.setenv("SCIGANTIC_MSA_TOKEN", "t")
-    assert main(["login", "--email", "a@lab.edu", "--code", "x"]) == 1
-    assert "could not reach" in capsys.readouterr().err
-    for args in (["list"], ["account"], ["pull", "abc"], ["rm", "abc"]):
-        assert main(args) == 1
-        assert "could not reach" in capsys.readouterr().err

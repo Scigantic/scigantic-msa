@@ -1,10 +1,8 @@
 import pytest
 
 from conftest import Q_6T33, Q_7M22A, Q_7M22C, Q_LITEFOLD, Q_LIVE, key
-from fake_backend import CODE, FakeBackend
 from test_colabfold import FakeColabFold
 from scigantic_msa import MSANotFound, get_msa, get_msas, where
-from scigantic_msa.account import AccountClient, NotLoggedIn
 from scigantic_msa.index import IndexIntegrityError
 
 
@@ -13,7 +11,6 @@ def env(index_setup, server, monkeypatch):
     idx, base, root = index_setup
     monkeypatch.setenv("SCIGANTIC_MSA_INDEX_URL", base)
     monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", server.url)
-    monkeypatch.setenv("SCIGANTIC_API_URL", server.url)
     from scigantic_msa.remote import colabfold
 
     monkeypatch.setattr(colabfold.time, "sleep", lambda s: None)
@@ -47,7 +44,7 @@ def test_no_remote_by_default(env):
     with pytest.raises(MSANotFound, match="remote='colabfold'") as e:
         get_msa(Q_LIVE)
     assert remote_calls(env) == 0
-    assert [s.name for s in e.value.steps] == ["cache", "account", "exact", "near", "remote"]
+    assert [s.name for s in e.value.steps] == ["cache", "exact", "near", "remote"]
 
 
 def test_remote_when_asked_then_cache(env, capsys):
@@ -78,16 +75,6 @@ def test_env_kill_switch_beats_explicit_remote(env, monkeypatch):
     assert remote_calls(env) == 0
 
 
-def test_config_turns_remote_on(env, monkeypatch):
-    from scigantic_msa.account import save_config
-
-    FakeColabFold(env, ["COMPLETE"])
-    save_config({"remote": "colabfold"})
-    assert get_msa(Q_LIVE).source == "remote"
-    with pytest.raises(MSANotFound):
-        get_msa(Q_LIVE, remote=False, cache=False)
-
-
 def test_corrupt_index_stops_before_any_remote_call(env, index_setup):
     _, _, _ = index_setup
     path = "/idx/v1/builds/test-build-1/shards/" + key(Q_LIVE)[:3] + ".jsonl.gz"
@@ -116,23 +103,6 @@ def test_bad_first_entry_falls_back_to_the_next(env, capsys):
     assert "did not check out" in capsys.readouterr().err
 
 
-def test_account_hit_and_save(env):
-    be = FakeBackend(env)
-    with pytest.raises(NotLoggedIn):
-        get_msa(Q_LIVE, remote="colabfold", save=True)
-    assert remote_calls(env) == 0
-    c = AccountClient()
-    c.login_start("old@lab.edu")
-    c.login_finish("old@lab.edu", CODE)
-    FakeColabFold(env, ["COMPLETE"])
-    m = get_msa(Q_LIVE, remote="colabfold", save=True, label="x")
-    assert m.account_id in be.items
-    # A fresh machine: no cache, signed in, the account answers first.
-    got = get_msa(Q_LIVE, cache=False)
-    assert got.source == "account" and got.account_id == m.account_id
-    assert be.srv.count(lambda r: r.path.startswith("/api/msa/lookup")) >= 1
-
-
 def test_where_sends_nothing(env):
     FakeColabFold(env, ["COMPLETE"])
     steps = where(Q_LIVE, remote="colabfold")
@@ -158,15 +128,6 @@ def test_homodimer_is_one_lookup(env):
     assert cx.pairing.message.startswith("one chain")
 
 
-def test_signed_in_with_the_api_down_still_uses_the_index(env, monkeypatch):
-    monkeypatch.setenv("SCIGANTIC_MSA_TOKEN", "saved-token")
-    monkeypatch.setenv("SCIGANTIC_API_URL", "http://127.0.0.1:9")
-    m = get_msa(Q_6T33)
-    assert m.source == "exact"
-    steps = where(Q_6T33)
-    assert steps[1].name == "account" and steps[1].outcome == "error"
-
-
 def test_an_unreachable_remote_is_a_miss_not_a_crash(env, monkeypatch):
     monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", "http://127.0.0.1:9")
     with pytest.raises(MSANotFound) as e:
@@ -183,44 +144,6 @@ def test_near_parent_shard_unreachable_is_reported_not_raised(env):
         get_msa(mut)
     near = [s for s in e.value.steps if s.name == "near"]
     assert near and near[0].outcome == "error" and "not reachable" in near[0].detail
-
-
-def _creates(server):
-    return server.count(lambda r: r.method == "POST" and r.path_only == "/api/msa/alignments")
-
-
-def test_save_on_a_cache_hit_does_not_upload_the_same_alignment_again(env):
-    fb = FakeBackend(env)
-    c = AccountClient()
-    c.login_start("old@lab.edu")
-    c.login_finish("old@lab.edu", CODE)
-    FakeColabFold(env, ["COMPLETE"])
-    first = get_msa(Q_LIVE, remote="colabfold", save=True)
-    assert first.source == "remote" and _creates(env) == 1
-    again = get_msa(Q_LIVE, save=True)
-    assert again.source == "cache" and again.account_id == first.account_id
-    assert _creates(env) == 1
-    # Deleted from the account: the next save=True stores it again.
-    AccountClient().delete(first.account_id)
-    third = get_msa(Q_LIVE, save=True)
-    assert _creates(env) == 2 and third.account_id != first.account_id
-    assert len(fb.items) == 1
-
-
-def test_no_upload_without_save_and_only_hashes_reach_the_api(env):
-    FakeBackend(env)
-    c = AccountClient()
-    c.login_start("old@lab.edu")
-    c.login_finish("old@lab.edu", CODE)
-    FakeColabFold(env, ["COMPLETE"])
-    get_msa(Q_LIVE, remote="colabfold")
-    get_msa(Q_6T33)
-    get_msas([Q_7M22A, Q_7M22C])
-    assert _creates(env) == 0 and env.count(lambda r: r.method == "PUT") == 0
-    for r in env.requests:
-        if r.path.startswith("/api/"):
-            for q in (Q_LIVE, Q_6T33, Q_7M22A, Q_7M22C):
-                assert q.encode() not in r.body and q not in r.path
 
 
 def test_remote_false_talks_only_to_the_index(env):

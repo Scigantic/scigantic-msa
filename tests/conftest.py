@@ -41,14 +41,12 @@ def key(seq: str) -> str:
 
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path, monkeypatch):
-    """No test touches the real cache, config, token or a real server."""
+    """No test touches the real cache or a real server."""
     for var in list(os.environ):
         if var.startswith(("SCIGANTIC_", "NVIDIA_", "HF_", "HUGGING_FACE")):
             monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("SCIGANTIC_MSA_CACHE", str(tmp_path / "cache"))
-    monkeypatch.setenv("SCIGANTIC_MSA_CONFIG", str(tmp_path / "config" / "msa.json"))
     monkeypatch.setenv("SCIGANTIC_MSA_INDEX_URL", "http://127.0.0.1:9/unused/")
-    monkeypatch.setenv("SCIGANTIC_API_URL", "http://127.0.0.1:9")
     monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", "http://127.0.0.1:9")
     from scigantic_msa import http
 
