@@ -66,8 +66,8 @@ the same order) adds an alignment of that chain against UniProt, such as
 AlphaFold 3's or OpenFold3's `uniprot_hits`; see Complexes.
 
 The argument to `run` is a FASTA file (UTF-8, UTF-16 as Windows Notepad
-saves it, or gzipped), `-` for stdin, or the sequence itself. So that a mistyped file name is never sent as a protein, a typed
-argument is refused when it names a directory, when a file with that name
+saves it, or gzipped), `-` for stdin, or the sequence itself. So that a
+mistyped file name is never sent as a protein, a typed argument is refused when it names a directory, when a file with that name
 plus an extension exists (`query` next to `query.fasta`), or when it is
 shorter than 10 residues. To send a short peptide on purpose, start it
 with `=`, as in `=MKVLAAG`. A sequence that is only `A`, `C`, `G`, `T`,
@@ -127,7 +127,6 @@ directly: the adapters do not share a signature.
 | `Protenix` | **required** | yes | `list[dict]` |
 
 ### Adapters directly
-
 
 Every adapter takes one result, or a list of results for the chains of a
 complex. The result carries its sequence; if you also pass the sequence,
