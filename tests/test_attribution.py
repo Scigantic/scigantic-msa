@@ -1,11 +1,13 @@
 """The attribution file keeps every write's credit when writes share a
-folder."""
+folder, and the command line flags that name jobs."""
+import io
 import json
 import threading
 
 import pytest
 
 from conftest import REAL
+from test_input import Q, Q2, FakeBackend
 from scigantic_msa import MSA
 from scigantic_msa.adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, Protenix
 from scigantic_msa.cli import MODELS, main
@@ -118,3 +120,40 @@ def test_writes_at_the_same_time_all_land(tmp_path):
     doc = side(tmp_path)
     assert len(doc["outputs"]) == 8 and len(doc["sources"]) == 8
     assert not list(tmp_path.glob("*.lock"))
+
+
+# --------------------------------------------------------------------------- --batch and --name
+
+
+@pytest.fixture
+def fake(monkeypatch):
+    b = FakeBackend()
+    monkeypatch.setattr("scigantic_msa.tool.make_backend", lambda *a, **k: b)
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    return b
+
+
+@pytest.mark.parametrize("model", MODELS)
+def test_batch_name_is_a_prefix_in_every_model(fake, tmp_path, model):
+    pytest.importorskip("pyarrow")
+    f = tmp_path / "b.fa"
+    f.write_text(f">a\n{Q}\n>\n{Q2}\n")
+    out = tmp_path / "o"
+    assert main(["run", str(f), "-m", model, "-o", str(out), "--yes", "--batch", "--name", "run 1", "-q"]) == 0
+    assert sorted(p.name for p in out.iterdir()) == ["run_1_a", "run_1_job2"]
+    for job in ("run_1_a", "run_1_job2"):
+        d = out / job / model
+        names = [p.name for p in d.iterdir()]
+        assert any(n.startswith(job + ".") for n in names), names
+        if model in ("af3", "openfold3", "protenix"):
+            doc = json.loads((d / f"{job}.json").read_text())
+            inner = (doc["name"] if model == "af3" else list(doc["queries"])[0] if model == "openfold3"
+                     else doc[0]["name"])
+            assert inner == job
+
+
+def test_batch_without_name_is_unchanged(fake, tmp_path):
+    f = tmp_path / "b.fa"
+    f.write_text(f">a\n{Q}\n>\n{Q2}\n")
+    assert main(["run", str(f), "-m", "boltz", "-o", str(tmp_path / "o"), "--yes", "--batch", "-q"]) == 0
+    assert sorted(p.name for p in (tmp_path / "o").iterdir()) == ["a", "job2"]

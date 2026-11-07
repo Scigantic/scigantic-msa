@@ -12,6 +12,9 @@ Changes you may notice:
   entry only when it rewrote all of that entry's files. A file from 0.2.3
   is kept as the first entry. The old top-level `chains`, `files` and
   `notes` keys are now inside each entry.
+- `--name` with `--batch` is a prefix for every job: `--name run1` writes
+  `<out>/run1_<record>/<model>/` and names the job `run1_<record>` in every
+  model's files. Before, it was ignored.
 
 ## 0.2.3
 

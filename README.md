@@ -80,8 +80,9 @@ with several records needs one of:
   20 chains).
 - `--batch`: each record is its own job, written to its own folder under
   `--out` and named after the record, such as `jobs/rec1/boltz/` (at most
-  100 jobs). A job the server cannot do does not stop the others; the
-  command ends with an error naming the failed jobs.
+  100 jobs). With `--name run1`, every job's name starts with it:
+  `jobs/run1_rec1/boltz/`. A job the server cannot do does not stop the
+  others; the command ends with an error naming the failed jobs.
 
 Before sending, `run` says how many sequences go to which server, and for
 a complex or batch, how many chains or jobs. After writing, `run` and
