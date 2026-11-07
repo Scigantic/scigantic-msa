@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+Changes you may notice:
+
+- `run` refuses what the model's writer would refuse before it sends
+  anything: a Protenix chain with `U`, `B`, `Z`, `J` or `O`, and Chai-1
+  without pyarrow. Before, the sequence went to the server first. In a
+  `--batch`, only the refused job is skipped, and the closing message says
+  its input must change instead of asking to run again.
+- A server URL with a non-ASCII character is refused, with its ASCII
+  spelling when it has one. Before, `run` said it was sending, then failed
+  with a latin-1 error.
+
+Fixes:
+
+- `https://api.colabfold.com/.`, `/./` and other paths of only dot segments
+  are the public server, with its warning, cap and cache.
+- An attribution file with an odd entry no longer crashes the write after
+  the model's files are written. Replacing an attribution file that cannot
+  be read prints a warning.
+- `--batch` gives records whose names differ only in case or Unicode form
+  (`ß` and `SS`, a Hangul syllable and its jamo) their own folders. On macOS
+  the second one overwrote the first.
+- `COM¹`, `LPT³` and the like, and `COM0` and `LPT0`, get a `_` in front as
+  Windows reserves them, and a name cut to 200 bytes no longer ends in `.`.
+
 ## 0.2.4
 
 Changes you may notice:
