@@ -193,3 +193,19 @@ def test_taxids_come_from_uniref_tax(server):
         ident = r.header.split("\t")[0]
         assert r.taxid == tax.get(ident)
     assert all(r.taxid is None for r in res.rows if r.db == "env")
+
+
+def test_a_server_that_never_answers_is_a_remote_error(server):
+    FakeColabFold(server, ["COMPLETE"])
+    server.faults[f"/ticket/{LIVE_ID}"] = [("sleep", 1.5)] * 4
+    c, _ = client(server, timeout=0.3)
+    with pytest.raises(RemoteError, match="could not reach"):
+        c.search(Q_LIVE)
+
+
+def test_a_download_cut_short_every_time_is_a_remote_error(server):
+    FakeColabFold(server, ["COMPLETE"])
+    server.faults[f"/result/download/{LIVE_ID}"] = [("truncate", 5000)] * 10
+    c, _ = client(server)
+    with pytest.raises(RemoteError):
+        c.search(Q_LIVE)

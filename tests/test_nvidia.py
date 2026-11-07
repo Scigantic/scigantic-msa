@@ -49,3 +49,9 @@ def test_errors(server, status, body, msg):
 def test_needs_a_key():
     with pytest.raises(RemoteError, match="NVIDIA_API_KEY"):
         NvidiaClient("http://127.0.0.1:9/p").search(Q_LIVE)
+
+
+def test_unreachable_server_is_a_remote_error():
+    c = NvidiaClient("http://127.0.0.1:9/predict", api_key="k", sleep=lambda s: None)
+    with pytest.raises(RemoteError, match="could not reach"):
+        c.search(Q_LIVE)

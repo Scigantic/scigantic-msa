@@ -127,12 +127,16 @@ class ColabFoldClient:
         headers = {"User-Agent": self.user_agent, "Accept": "application/json"}
         if body is not None:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-        return http.request(
-            method, self.host + path, data=body, headers=headers, timeout=self.timeout,
-            retry=http.RetryPolicy(attempts=4, base_delay=5.0, max_delay=60.0),
-            retry_statuses=frozenset({500, 502, 503, 504}),
-            raise_for_status=False,
-        )
+        try:
+            return http.request(
+                method, self.host + path, data=body, headers=headers, timeout=self.timeout,
+                retry=http.RetryPolicy(attempts=4, base_delay=5.0, max_delay=60.0),
+                retry_statuses=frozenset({500, 502, 503, 504}),
+                raise_for_status=False,
+            )
+        except http.HTTPError as e:
+            # The server could not be reached at all (refused, DNS, timeouts).
+            raise RemoteError(f"{self.server_name}: {e}") from None
 
     def _json(self, resp: http.Response, what: str) -> Dict[str, object]:
         if resp.status == 429:

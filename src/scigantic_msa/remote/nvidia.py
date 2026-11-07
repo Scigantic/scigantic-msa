@@ -69,6 +69,14 @@ class NvidiaClient:
             "Accept": "application/json",
         }
 
+    def _request(self, method: str, url: str, data: Optional[bytes] = None) -> http.Response:
+        try:
+            return http.request(method, url, data=data, headers=self._headers(), timeout=self.timeout,
+                                raise_for_status=False)
+        except http.HTTPError as e:
+            # The server could not be reached at all (refused, DNS, timeouts).
+            raise RemoteError(f"NVIDIA MSA search: {e}") from None
+
     def search(self, seq: str) -> RemoteResult:
         seq = canonical_sequence(seq)
         body = json.dumps({
@@ -78,8 +86,7 @@ class NvidiaClient:
             "output_alignment_formats": ["a3m"],
         }).encode()
         started = time.time()
-        resp = http.request("POST", self.url, data=body, headers=self._headers(), timeout=self.timeout,
-                            raise_for_status=False)
+        resp = self._request("POST", self.url, data=body)
         end = time.monotonic() + self.deadline
         while resp.status == 202:
             reqid = resp.headers.get("NVCF-REQID") or resp.headers.get("nvcf-reqid")
@@ -88,8 +95,7 @@ class NvidiaClient:
             if time.monotonic() > end:
                 raise RemoteError("gave up waiting for the NVIDIA MSA search")
             self.sleep(self.poll)
-            resp = http.request("GET", self.status_url.format(reqid=reqid), headers=self._headers(),
-                                timeout=self.timeout, raise_for_status=False)
+            resp = self._request("GET", self.status_url.format(reqid=reqid))
         if resp.status == 401 or resp.status == 403:
             raise RemoteError(f"NVIDIA rejected the API key (HTTP {resp.status})")
         if resp.status != 200:

@@ -164,11 +164,10 @@ class AccountClient:
             h["Content-Type"] = "application/json"
         if auth:
             h["Authorization"] = f"Bearer {self._ensure_token()}"
-        resp = http.request(
+        resp = _send(
             method, self.base + path, data=data, headers=h, timeout=self.timeout,
             retry=http.RetryPolicy(attempts=3, base_delay=1.0, max_delay=10.0),
             retry_statuses=frozenset({502, 503, 504}),
-            raise_for_status=False,
         )
         try:
             payload = json.loads(resp.body) if resp.body else {}
@@ -266,9 +265,8 @@ class AccountClient:
         hdrs.setdefault("Content-Length", str(len(data)))
         if hdrs.get("Content-Length") != str(len(data)):
             raise AccountError(400, "the server signed a different size than this upload")
-        resp = http.request(up.get("method", "PUT"), up["url"], data=data, headers=hdrs,
-                            timeout=max(self.timeout, 300), raise_for_status=False,
-                            retry=http.RetryPolicy(attempts=3, base_delay=2.0))
+        resp = _send(up.get("method", "PUT"), up["url"], data=data, headers=hdrs,
+                     timeout=max(self.timeout, 300), retry=http.RetryPolicy(attempts=3, base_delay=2.0))
         if resp.status not in (200, 201, 204):
             raise AccountError(resp.status, f"upload to storage failed: HTTP {resp.status}")
         rec = self.request("POST", f"/api/msa/alignments/{urllib.parse.quote(aid)}/complete")
@@ -313,7 +311,7 @@ class AccountClient:
 
     def download_bytes(self, alignment_id: str) -> bytes:
         d = self.request("GET", f"/api/msa/alignments/{urllib.parse.quote(alignment_id)}/download")
-        resp = http.request("GET", d["url"], timeout=max(self.timeout, 300), raise_for_status=False)
+        resp = _send("GET", d["url"], timeout=max(self.timeout, 300))
         if resp.status != 200:
             raise AccountError(resp.status, f"download from storage failed: HTTP {resp.status}")
         body = resp.body
@@ -333,6 +331,16 @@ class AccountClient:
     def delete(self, alignment_id: str) -> bool:
         d = self.request("DELETE", f"/api/msa/alignments/{urllib.parse.quote(alignment_id)}")
         return bool(d.get("deleted"))
+
+
+def _send(method: str, url: str, **kw: Any) -> http.Response:
+    """http.request that reports an unreachable server as an AccountError, so
+    callers that fall through to other sources when the account fails also do
+    so when the network is down."""
+    try:
+        return http.request(method, url, raise_for_status=False, **kw)
+    except http.HTTPError as e:
+        raise AccountError(e.status, str(e), "unreachable") from None
 
 
 def _small_params(msa: MSA) -> Dict[str, Any]:

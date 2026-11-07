@@ -204,3 +204,11 @@ def test_lookup_slides_a_token_close_to_expiry(backend, monkeypatch):
     c.lookup([key(Q_6T33)])
     assert load_config()["token"] != old
     assert backend.srv.count(lambda r: r.path == "/api/msa/token/refresh") == 1
+
+
+def test_unreachable_api_is_an_account_error(monkeypatch):
+    monkeypatch.setenv("SCIGANTIC_API_URL", "http://127.0.0.1:9")
+    c = AccountClient(token="t")
+    with pytest.raises(AccountError) as e:
+        c.lookup([key(Q_6T33)])
+    assert e.value.code == "unreachable" and "could not reach" in e.value.message
