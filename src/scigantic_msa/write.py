@@ -25,8 +25,17 @@ from .alignment import Alignment
 MODELS = ("af3", "boltz", "chai", "colabfold", "openfold3", "protenix")
 
 
-def write_model(model: str, chains: List[Alignment], out: Path, name: str, quiet: bool) -> Tuple[List[str], str]:
-    """Write the input for one model. Returns (files written, next command)."""
+def write_model(model: str, chains: List[Alignment], out: "str | Path", name: str = "query",
+                quiet: bool = False) -> Tuple[List[str], str]:
+    """Write the input for one model into ``out/<model>/``. Returns (files
+    written, next command).
+
+    Each model gets its own folder so several models can share one ``out``
+    without overwriting each other's input, MSA files, attribution file or
+    predictions."""
+    if model not in MODELS:
+        raise ValueError(f"unknown model {model}")
+    out = Path(out) / model
     out.mkdir(parents=True, exist_ok=True)
     if model == "af3":
         AlphaFold3.prepare(chains, name=name, out_dir=out, quiet=quiet)

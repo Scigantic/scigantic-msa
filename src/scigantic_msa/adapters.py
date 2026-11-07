@@ -163,7 +163,9 @@ class AlphaFold3:
         if out_dir is not None:
             d = _out(out_dir)
             path = d / f"{_safe_name(name or 'input')}.json"
-        doc = writers.write_af3_json(chains, path, input=input, name=name)
+        # AlphaFold 3 keeps dots in the output directory it makes from the
+        # name, so a name of ".." would write outside --output_dir.
+        doc = writers.write_af3_json(chains, path, input=input, name=_safe_name(name) if name else None)
         msas = [m for m, _ in _distinct(chains)]
         if len(msas) > 1:
             if all(m.uniprot_rows and len(m.uniprot_rows) > 1 for m in msas):
@@ -367,7 +369,8 @@ class OpenFold3:
             out_chains.append(entry)
         if len(n_paired) > 1:
             raise PrepareError("OpenFold3: the paired files do not have the same number of rows")
-        return {"queries": {name: {"chains": out_chains}}}
+        # OpenFold3 makes an output directory from the query name.
+        return {"queries": {_safe_name(name): {"chains": out_chains}}}
 
 
 # --------------------------------------------------------------------------- Protenix
@@ -476,7 +479,8 @@ class Protenix:
             seqs.append({"proteinChain": pc})
         writers._sidecar(d, chains, [pr.message] if pr is not None else [],
                          {m.seq_sha256: [n for n in PROTENIX_FILES if (d / m.seq_sha256 / n).is_file()] for m in msas})
-        jobs = [{"name": name, "sequences": seqs}]
+        # Protenix makes an output directory from the job name.
+        jobs = [{"name": _safe_name(name), "sequences": seqs}]
         Protenix.check(jobs)
         return jobs
 

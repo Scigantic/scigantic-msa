@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 from .a3m import A3MError, parse_a3m, parse_stockholm
 from .alignment import Alignment
-from .cache import AlignmentCache
+from .cache import AlignmentCache, LockTimeout
 from .remote import BACKENDS, announce, make_backend, remote_disabled
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
 
@@ -99,7 +99,29 @@ class MSA:
         if self._cache is None:
             return None
         q = canonical_sequence(sequence)
-        return self._cache.get(seq_sha256(q), self.backend.name, self.backend.dbkey)
+        return self._cache_get(seq_sha256(q))
+
+    def _cache_get(self, sha: str) -> Optional[Alignment]:
+        if self._cache is None:
+            return None
+        try:
+            return self._cache.get(sha, self.backend.name, self.backend.dbkey)
+        except OSError as e:
+            self._drop_cache(e)
+            return None
+
+    def _drop_cache(self, e: OSError) -> None:
+        """Caching is optional: a cache directory that cannot be used (read
+        only, or a path that is a file) must not stop a search. Say so once
+        and carry on without it."""
+        if self._cache is None:
+            return
+        where = self._cache.root.parent
+        self._cache = None
+        msg = (f"cannot use the cache at {where} ({e.strerror or type(e).__name__}); continuing without it. "
+               "Pass --no-cache (cache=False in Python) to skip it.")
+        log.info(msg)
+        print(f"scigantic-msa: warning: {msg}", file=sys.stderr, flush=True)
 
     # ------------------------------------------------------------ get
     def get(self, sequence: Union[str, Sequence[str]], *, remote: bool = False) -> Any:
@@ -131,17 +153,22 @@ class MSA:
     def _one(self, q: str, what: str) -> Alignment:
         sha = seq_sha256(q)
         b = self.backend
-        if self._cache is not None:
-            hit = self._cache.get(sha, b.name, b.dbkey)
-            if hit is not None:
-                self._say(f"{what}: {hit.summary()} (nothing sent)")
-                return hit
+        hit = self._cache_get(sha)
+        if hit is not None:
+            self._say(f"{what}: {hit.summary()} (nothing sent)")
+            return hit
         lock = self._cache.lock(sha, b.name, b.dbkey) if self._cache is not None else None
         if lock is not None:
-            lock.acquire()
+            try:
+                lock.acquire()
+            except LockTimeout:
+                raise
+            except OSError as e:
+                lock = None
+                self._drop_cache(e)
         try:
-            if self._cache is not None:
-                again = self._cache.get(sha, b.name, b.dbkey)
+            if lock is not None:
+                again = self._cache_get(sha)
                 if again is not None:
                     self._say(f"{what}: computed by another process while waiting")
                     return again
@@ -154,7 +181,7 @@ class MSA:
                 try:
                     m.cache_path = str(self._cache.put(m, b.name, b.dbkey))
                 except OSError as e:
-                    log.warning("could not write the cache: %s", e)
+                    self._drop_cache(e)
             self._say(f"{what}: {m.summary()}")
             return m
         finally:

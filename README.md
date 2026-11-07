@@ -36,7 +36,8 @@ Your sequence may be unpublished, so read this before you run a search.
 - The sequence is never written to a log. Results are kept in a local cache
   (`~/.cache/scigantic-msa`, or `SCIGANTIC_MSA_CACHE`) so the same sequence
   is not submitted twice; delete the directory to forget them, or pass
-  `--no-cache`.
+  `--no-cache`. If the cache directory cannot be written (read-only home,
+  say), the tool warns once and runs without it.
 - `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks.
 
 The public ColabFold server is a shared resource with a rate limit of about
@@ -86,8 +87,10 @@ same command again: it picks up the same job without sending it again.
 `--server nvidia` uses NVIDIA's hosted MSA Search and needs
 `NVIDIA_API_KEY`.
 
-After writing the files, the command prints the command to run the model
-on them.
+Each model's files go in their own folder under `--out` (`job/boltz/`,
+`job/af3/` and so on), so several models can share one `--out` without
+overwriting each other. After writing the files, the command prints the
+command to run the model on them.
 
 ## Python
 
@@ -102,9 +105,9 @@ files, next_command = write_model("boltz", chains, out_dir, name="job")
 
 `write_model` takes the same model names as `--model`
 (`af3`, `boltz`, `chai`, `colabfold`, `openfold3`, `protenix`), writes the
-files, and returns the paths it wrote plus the command to run next. Use it
-unless you need an adapter's return value directly: the adapters do not share
-a signature.
+files into `out_dir/<model>/`, and returns the paths it wrote plus the
+command to run next. Use it unless you need an adapter's return value
+directly: the adapters do not share a signature.
 
 | Adapter | `out_dir` | `name` | returns |
 |---|---|---|---|

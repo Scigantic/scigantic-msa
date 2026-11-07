@@ -132,3 +132,9 @@ def test_the_package_reports_the_version_it_was_built_as():
     )
     assert 'version = {attr = "scigantic_msa.__version__"}' in pyproject
     assert re.fullmatch(r"\d+\.\d+\.\d+", scigantic_msa.__version__), scigantic_msa.__version__
+
+
+def test_readme_call_works_as_written(chains, tmp_path):
+    # The README calls write_model without quiet and with a str out_dir.
+    files, nxt = write_model("boltz", chains, str(tmp_path), name="job")
+    assert files and files[0].startswith(str(tmp_path / "boltz"))

@@ -34,7 +34,7 @@ def test_run_with_yes(colabfold, tmp_path, capsys, monkeypatch):
     err = capsys.readouterr().err
     assert f"This sends 1 sequence (length {len(Q_LIVE)}) to 127.0.0.1" in err
     assert "boltz predict" in err and Q_LIVE not in err
-    y = (tmp_path / "o" / "query.yaml").read_text()
+    y = (tmp_path / "o" / "boltz" / "query.yaml").read_text()
     assert f"sequence: {Q_LIVE}" in y
 
 
@@ -61,7 +61,7 @@ def test_run_asks_once_and_honours_no(colabfold, tmp_path, capsys, monkeypatch):
     assert len(asked) == 2 and stub.submits == 2
     err = capsys.readouterr().err
     assert "This sends 2 sequences" in err and "--resolve_msa_overlaps=false" in err
-    doc = json.loads((tmp_path / "o" / "query.json").read_text())
+    doc = json.loads((tmp_path / "o" / "af3" / "query.json").read_text())
     assert len(doc["sequences"]) == 2
 
 
@@ -73,7 +73,7 @@ def test_run_from_cache_does_not_ask_or_send(colabfold, tmp_path, capsys, monkey
     assert main(["run", Q_LIVE, "-m", "colabfold", "-o", str(tmp_path / "b")]) == 0
     assert sent(colabfold) == n
     assert "nothing is sent" in capsys.readouterr().err
-    assert parse_a3m((tmp_path / "b" / "query.a3m").read_text(), Q_LIVE)
+    assert parse_a3m((tmp_path / "b" / "colabfold" / "query.a3m").read_text(), Q_LIVE)
 
 
 def test_run_reports_server_failure_without_a_traceback(colabfold, tmp_path, capsys):
@@ -101,7 +101,7 @@ def test_convert_complex_and_checks(tmp_path, capsys):
     a.write_text((REAL / "of3-7m22_A" / "cfdb_uniref30.a3m").read_text())
     b.write_text((REAL / "of3-7m22_C" / "cfdb_uniref30.a3m").read_text())
     assert main(["convert", str(a), str(b), "-m", "protenix", "-o", str(tmp_path / "o"), "-q"]) == 0
-    jobs = json.loads((tmp_path / "o" / "a.json").read_text())
+    jobs = json.loads((tmp_path / "o" / "protenix" / "a.json").read_text())
     assert [s["proteinChain"]["sequence"] for s in jobs[0]["sequences"]] == [Q_7M22A, Q_7M22C]
     assert main(["convert", str(a), "-m", "af3", "-o", str(tmp_path / "x"), "--sequence", Q_7M22C]) == 1
     assert "not the sequence given" in capsys.readouterr().err
@@ -136,9 +136,10 @@ def test_removed_commands_are_gone(capsys):
 def test_output_names(tmp_path):
     a3m = REAL / "of3-6t33_A" / "cfdb_uniref30.a3m"
     assert main(["convert", str(a3m), "-m", "openfold3", "-o", str(tmp_path), "--name", "my job", "-q"]) == 0
-    q = json.loads((tmp_path / "my_job.json").read_text())
-    assert list(q["queries"]) == ["my job"]
-    assert Path(q["queries"]["my job"]["chains"][0]["main_msa_file_paths"]).is_dir()
+    q = json.loads((tmp_path / "openfold3" / "my_job.json").read_text())
+    # OpenFold3 makes a directory from the query name, so it is file-safe too.
+    assert list(q["queries"]) == ["my_job"]
+    assert Path(q["queries"]["my_job"]["chains"][0]["main_msa_file_paths"]).is_dir()
 
 
 def test_run_with_a_missing_file_sends_nothing(colabfold, tmp_path, capsys):
