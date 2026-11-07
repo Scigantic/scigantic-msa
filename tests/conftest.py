@@ -1,8 +1,7 @@
-"""Shared test harness: an HTTP server with fault injection, an index builder
-that writes the exact v1 format, and the real fixture files."""
+"""Shared test harness: an HTTP server with fault injection and the real
+fixture files."""
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import os
@@ -11,7 +10,7 @@ import time
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
 import pytest
 
@@ -46,7 +45,6 @@ def isolated_env(tmp_path, monkeypatch):
         if var.startswith(("SCIGANTIC_", "NVIDIA_", "HF_", "HUGGING_FACE")):
             monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("SCIGANTIC_MSA_CACHE", str(tmp_path / "cache"))
-    monkeypatch.setenv("SCIGANTIC_MSA_INDEX_URL", "http://127.0.0.1:9/unused/")
     monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", "http://127.0.0.1:9")
     from scigantic_msa import http
 
@@ -193,161 +191,100 @@ def server():
     s.close()
 
 
-# --------------------------------------------------------------------------- index builder
+# --------------------------------------------------------------------------- real alignments
 
 
 def real(rel: str) -> bytes:
     return (REAL / rel).read_bytes()
 
 
-def serve_real_files(srv: FakeServer) -> Dict[str, str]:
-    """Put the real fixture files on the server under source-like paths.
-    Returns rel -> url."""
-    urls = {}
-    for p in sorted(REAL.rglob("*")):
-        if p.is_file() and p.name != "MANIFEST.json":
-            rel = str(p.relative_to(REAL))
-            path = "/src/" + rel
-            srv.static[path] = p.read_bytes()
-            urls[rel] = srv.url + path
-    return urls
+_DIRS = {
+    Q_6T33: "of3-6t33_A", Q_1HVW: "of3-1hvw_A", Q_1PXQ: "of3-1pxq_A",
+    Q_7M22A: "of3-7m22_A", Q_7M22C: "of3-7m22_C", Q_LITEFOLD: "litefold-A0A096LP01",
+}
 
 
-def fref(urls: Dict[str, str], rel: str, role: str, fmt: str) -> Dict[str, Any]:
-    return {"role": role, "format": fmt, "url": urls[rel], "offset": 0, "length": len(real(rel)), "compression": "none"}
+def real_alignment(seq: str, *, with_uniprot: bool = False):
+    """An Alignment built from the real published files in fixtures/real:
+    OpenFold3 training MSAs (cfdb_uniref30.a3m, plus uniprot_hits.sto for
+    pairing) and a LiteFold ColabFold MSA."""
+    from scigantic_msa.a3m import parse_a3m, parse_stockholm
+    from scigantic_msa.alignment import Alignment
+
+    d = REAL / _DIRS[seq]
+    a3m = d / ("A0A096LP01.a3m" if seq == Q_LITEFOLD else "cfdb_uniref30.a3m")
+    rows = parse_a3m(a3m.read_bytes(), seq, skip_comments=True)
+    uni = None
+    if with_uniprot and (d / "uniprot_hits.sto").is_file():
+        uni = parse_stockholm((d / "uniprot_hits.sto").read_bytes().split(b"\n"), seq, db="uniprot", max_rows=10_000)
+    return Alignment(query=seq, rows=rows, source="file", provenance={"from": "file", "file": a3m.name},
+                     attribution=[{"id": _DIRS[seq], "license": "CC-BY-4.0"}], uniprot_rows=uni)
 
 
-def standard_entries(urls: Dict[str, str]) -> List[Dict[str, Any]]:
-    return [
-        {"seq": Q_6T33, "source": "openfold3-pdb", "source_id": "6t33_A", "license": "CC-BY-4.0", "files": [
-            fref(urls, "of3-6t33_A/cfdb_uniref30.a3m", "cfdb_uniref30", "a3m"),
-            fref(urls, "of3-6t33_A/uniref90_hits.sto", "uniref90", "sto"),
-            fref(urls, "of3-6t33_A/mgnify_hits.sto", "mgnify", "sto"),
-            fref(urls, "of3-6t33_A/uniprot_hits.sto", "uniprot", "sto"),
-        ]},
-        {"seq": Q_6T33, "source": "openproteinset-pdb", "source_id": "6t33_A", "n_aliases": 1, "license": "CC-BY-4.0", "files": [
-            fref(urls, "ops-6t33_A/uniref90_hits.a3m", "uniref90", "a3m"),
-            fref(urls, "ops-6t33_A/bfd_uniclust_hits.a3m", "bfd_uniclust", "a3m"),
-            fref(urls, "ops-6t33_A/mgnify_hits.a3m", "mgnify", "a3m"),
-            fref(urls, "ops-6t33_A/pdb70_hits.hhr", "templates_pdb70", "hhr"),
-        ]},
-        {"seq": Q_1HVW, "source": "openfold3-pdb", "source_id": "1hvw_A", "license": "CC-BY-4.0", "files": [
-            fref(urls, "of3-1hvw_A/cfdb_uniref30.a3m", "cfdb_uniref30", "a3m"),
-            fref(urls, "of3-1hvw_A/uniprot_hits.sto", "uniprot", "sto"),
-        ]},
-        {"seq": Q_1PXQ, "source": "openfold3-pdb", "source_id": "1pxq_A", "license": "CC-BY-4.0", "files": [
-            fref(urls, "of3-1pxq_A/cfdb_uniref30.a3m", "cfdb_uniref30", "a3m"),
-            fref(urls, "of3-1pxq_A/uniprot_hits.sto", "uniprot", "sto"),
-        ]},
-        {"seq": Q_7M22A, "source": "openfold3-pdb", "source_id": "7m22_A", "license": "CC-BY-4.0", "files": [
-            fref(urls, "of3-7m22_A/cfdb_uniref30.a3m", "cfdb_uniref30", "a3m"),
-            fref(urls, "of3-7m22_A/uniprot_hits.sto", "uniprot", "sto"),
-        ]},
-        {"seq": Q_7M22C, "source": "openfold3-pdb", "source_id": "7m22_C", "license": "CC-BY-4.0", "files": [
-            fref(urls, "of3-7m22_C/cfdb_uniref30.a3m", "cfdb_uniref30", "a3m"),
-            fref(urls, "of3-7m22_C/uniprot_hits.sto", "uniprot", "sto"),
-        ]},
-        {"seq": Q_LITEFOLD, "source": "litefold-human-colabfold", "source_id": "A0A096LP01", "license": "CC-BY-4.0", "files": [
-            fref(urls, "litefold-A0A096LP01/A0A096LP01.a3m", "colabfold", "a3m"),
-            fref(urls, "litefold-A0A096LP01/A0A096LP01.json", "af3_json", "json"),
-        ]},
-        {"seq": uniclust_query(), "source": "openproteinset-uniclust30", "source_id": "A0A1A9ZI35", "license": "CC-BY-4.0", "files": [
-            fref(urls, "uniclust30-A0A1A9ZI35/uniclust30.a3m", "uniclust30", "a3m"),
-        ]},
-    ]
+# --------------------------------------------------------------------------- a fake ColabFold server for any sequence
 
 
-def uniclust_query() -> str:
-    from scigantic_msa.a3m import a3m_query
+def make_result_tar(query: str, hits: List[tuple]) -> bytes:
+    """A ColabFold-style result tar.gz. hits: (accession, row, taxid or None).
+    Rows go to uniref.a3m; taxids to uniref_tax.tsv; the env file repeats the
+    query only."""
+    import io
+    import tarfile
 
-    q = a3m_query(real("uniclust30-A0A1A9ZI35/uniclust30.a3m").decode(), "A0A1A9ZI35")
-    assert q
-    return q
-
-
-SOURCES = [
-    {"id": "openfold3-pdb", "title": "OpenFold3 training MSAs (PDB chains)", "license": "CC-BY-4.0",
-     "attribution": "OpenFold Consortium", "citation": "https://github.com/aqlaboratory/openfold-3",
-     "url_prefixes": {"https://openfold3-data.s3.us-west-2.amazonaws.com/": "s3://openfold3-data/"}},
-    {"id": "litefold-human-colabfold", "title": "LiteFold human proteome ColabFold MSAs", "license": "CC-BY-4.0",
-     "attribution": "LiteFold", "citation": "https://huggingface.co/datasets/LiteFold/human-proteome-wide-msa"},
-    {"id": "openproteinset-pdb", "title": "OpenProteinSet PDB chains", "license": "CC-BY-4.0",
-     "attribution": "Ahdritz et al.", "citation": "https://arxiv.org/abs/2308.05326",
-     "url_prefixes": {"https://openfold.s3.amazonaws.com/": "s3://openfold/"}},
-    {"id": "openproteinset-uniclust30", "title": "OpenProteinSet UniClust30", "license": "CC-BY-4.0",
-     "attribution": "Ahdritz et al.", "citation": "https://arxiv.org/abs/2308.05326"},
-]
-PRIORITY = ["openfold3-pdb", "litefold-human-colabfold", "openproteinset-pdb", "openproteinset-uniclust30"]
+    uniref = f">101\n{query}\n" + "".join(f">{acc}\t50\t0.9\n{row}\n" for acc, row, _ in hits)
+    env = f">101\n{query}\n"
+    tax = "".join(f"{t}\t{acc}\n" for acc, _, t in hits if t)
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, text in (("uniref.a3m", uniref), ("bfd.mgnify30.metaeuk30.smag30.a3m", env),
+                           ("uniref_tax.tsv", tax), ("msa.sh", "#!/bin/sh\n")):
+            data = text.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
 
 
-def build_index(root: Path, entries: List[Dict[str, Any]], build_id: str = "test-build-1",
-                extra_sequences: Optional[Dict[str, str]] = None) -> Path:
-    """Write a v1 index under root (root/v1/...). Entries carry 'seq', which
-    is used for the by_length and sequences files and dropped from lines."""
-    broot = root / "v1" / "builds" / build_id
-    files: Dict[str, bytes] = {}
-    shards: Dict[str, List[str]] = defaultdict(list)
-    seqs: Dict[str, str] = dict(extra_sequences or {})
-    prio = {s: i for i, s in enumerate(PRIORITY)}
-    lines = []
-    for e in entries:
-        d = {k: v for k, v in e.items() if k != "seq"}
-        sha = key(e["seq"])
-        d["seq_sha256"] = sha
-        d["length"] = len(e["seq"])
-        seqs[sha] = e["seq"]
-        lines.append((sha, prio.get(d["source"], 99), json.dumps(d, separators=(",", ":"))))
-    lines.sort()
-    for sha, _, line in lines:
-        shards[sha[:3]].append(line)
-    for i in range(4096):
-        p = f"{i:03x}"
-        body = [json.dumps({"_shard": p, "build_id": build_id, "entries": len(shards.get(p, []))})] + shards.get(p, [])
-        files[f"shards/{p}.jsonl.gz"] = gzip.compress(("\n".join(body) + "\n").encode(), mtime=0)
-    by_len: Dict[int, List[tuple]] = defaultdict(list)
-    for sha, s in seqs.items():
-        by_len[len(s)].append((sha, s))
-    bl_index = {}
-    for L, items in sorted(by_len.items()):
-        data = gzip.compress("".join(f">{sha}\n{s}\n" for sha, s in sorted(items)).encode(), mtime=0)
-        files[f"by_length/{L}.fa.gz"] = data
-        bl_index[str(L)] = {"n": len(items), "sha256": _sha(data)}
-    files["by_length/index.json"] = json.dumps(bl_index).encode()
-    files["sequences.fasta.gz"] = gzip.compress("".join(f">{sha}\n{s}\n" for sha, s in sorted(seqs.items())).encode(), mtime=0)
-    sums = "".join(f"{_sha(b)}  {rel}\n" for rel, b in sorted(files.items())).encode()
-    for rel, b in files.items():
-        (broot / rel).parent.mkdir(parents=True, exist_ok=True)
-        (broot / rel).write_bytes(b)
-    (broot / "SHA256SUMS").write_bytes(sums)
-    manifest = {
-        "format": "scigantic-msa-index", "format_version": 1, "build_id": build_id,
-        "built_at": "2026-11-06T00:00:00Z", "build_root": f"v1/builds/{build_id}/",
-        "shard_hex_len": 3, "shard_path": "shards/{prefix}.jsonl.gz",
-        "sha256sums": "SHA256SUMS", "sha256sums_sha256": _sha(sums),
-        "counts": {"entries": len(entries), "unique_sequences": len(seqs)},
-        "source_priority": PRIORITY, "sources": SOURCES,
-        "near": {"by_length": "by_length/{length}.fa.gz", "by_length_index": "by_length/index.json",
-                 "sequences_fasta": "sequences.fasta.gz"},
-    }
-    mb = json.dumps(manifest, indent=1).encode()
-    (broot / "manifest.json").write_bytes(mb)
-    (root / "v1" / "manifest.json").write_bytes(mb)
-    return root
+class ColabFoldStub:
+    """Answers the ColabFold API for a set of sequences: a job is UNKNOWN
+    until submitted, then COMPLETE. Records submissions."""
 
+    def __init__(self, server: FakeServer, tars: Dict[str, bytes], mode: str = "env-taxonomy"):
+        import urllib.parse
 
-def serve_dir(srv: FakeServer, root: Path, mount: str = "/idx") -> str:
-    for p in root.rglob("*"):
-        if p.is_file():
-            srv.static[mount + "/" + str(p.relative_to(root))] = p.read_bytes()
-    return srv.url + mount + "/"
+        from scigantic_msa.remote.colabfold import query_text, ticket_id
+
+        self.by_id = {ticket_id(query_text(q), mode): t for q, t in tars.items()}
+        self.submitted: List[str] = []
+        self.submits = 0
+
+        def submit(req):
+            form = urllib.parse.parse_qs(req.body.decode())
+            tid = ticket_id(form["q"][0], form["mode"][0])
+            self.submits += 1
+            self.submitted.append(tid)
+            st = "COMPLETE" if tid in self.by_id else "ERROR"
+            return 200, {}, json.dumps({"id": tid, "status": st}).encode()
+
+        def status(req):
+            tid = req.path_only.rsplit("/", 1)[1]
+            st = "COMPLETE" if tid in self.submitted and tid in self.by_id else "UNKNOWN"
+            return 200, {}, json.dumps({"id": tid, "status": st}).encode()
+
+        def download(req):
+            tid = req.path_only.rsplit("/", 1)[1]
+            return (200, {}, self.by_id[tid]) if tid in self.by_id else (404, {}, b"")
+
+        server.route("POST", "/ticket/msa", submit)
+        server.route_prefix("GET", "/ticket/", status)
+        server.route_prefix("GET", "/result/download/", download)
 
 
 @pytest.fixture
-def index_setup(server, tmp_path):
-    """A served index over the real fixture files. Returns (Index, base_url, root)."""
-    from scigantic_msa.index import Index
+def colabfold(server, monkeypatch):
+    """Point the ColabFold client at the fake server and make waits instant."""
+    monkeypatch.setenv("SCIGANTIC_MSA_COLABFOLD_URL", server.url)
+    from scigantic_msa.remote import colabfold as cf
 
-    urls = serve_real_files(server)
-    root = build_index(tmp_path / "index", standard_entries(urls))
-    base = serve_dir(server, root)
-    return Index(base, cache_root=tmp_path / "cache"), base, root
+    monkeypatch.setattr(cf.time, "sleep", lambda s: None)
+    return server

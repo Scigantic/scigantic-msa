@@ -1,13 +1,13 @@
-"""Write MSAs in the input format each structure predictor reads.
+"""Low-level writers behind :mod:`scigantic_msa.adapters`.
 
 Every writer that produces files also writes ``scigantic-msa-attribution.json``
-next to them: which source each alignment came from, its license, whether
-rows were copied from a near-identical sequence, and notes about pairing.
+next to them: where each alignment came from, its terms, and notes about
+pairing.
 
-Format rules are from the predictors' own parsers (see FORMATS notes in the
-repository history): AlphaFold 3 ``folding_input.py``, Boltz ``parse/csv.py``
-and ``main.py``, Chai-1 ``aligned_pqt.py``, ColabFold ``input.py`` and
-OpenFold3 ``dataset_config_components.py``.
+Format rules are from the predictors' own parsers: AlphaFold 3
+``folding_input.py``, Boltz ``parse/csv.py`` and ``main.py``, Chai-1
+``aligned_pqt.py``, ColabFold ``input.py`` and OpenFold3
+``dataset_config_components.py``.
 """
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from .pairing import Pairing, pair_by_species
 from .seqkey import canonical_sequence
 
 __all__ = [
-    "write_a3m",
     "write_colabfold",
     "write_af3_json",
     "write_boltz",
@@ -91,7 +90,6 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
                 "summary": m.summary(),
                 "depth": m.depth,
                 "attribution": m.attribution,
-                "derived": m.derived,
                 "provenance": m.provenance,
             }
             for m in chains
@@ -107,18 +105,6 @@ def _unpaired_with_prepaired(m: Alignment, paired: List[Row]) -> List[Row]:
     used = {id(r) for r in paired}
     rest = [r for r in m.rows[1:] if id(r) not in used]
     return [m.rows[0]] + list(paired) + dedupe_rows([m.rows[0]] + rest)[1:]
-
-
-# --------------------------------------------------------------------------- A3M
-
-
-def write_a3m(msa: Alignment, path: "str | Path | None" = None, *, max_rows: Optional[int] = None) -> str:
-    text = msa.a3m(max_rows=max_rows)
-    if path is not None:
-        p = Path(path)
-        _atomic_write(p, text)
-        _sidecar(p.parent, [msa], [], {msa.seq_sha256: p.name})
-    return text
 
 
 # --------------------------------------------------------------------------- ColabFold
@@ -453,7 +439,7 @@ def write_openfold3(chains: Sequence[Alignment], directory: "str | Path", *, pai
         mdir = d / "main" / m.seq_sha256
         _atomic_write(mdir / "colabfold_main.a3m", m.a3m())
         if m.uniprot_rows and len(m.uniprot_rows) > 1 and (all_uniprot or len(msas) == 1):
-            _atomic_write(mdir / "uniprot_hits.a3m", m.uniprot_a3m())
+            _atomic_write(mdir / "uniprot_hits.a3m", format_a3m(m.uniprot_rows or []))
         f = {"main_msa_file_paths": str(mdir)}
         if m.query in paired_dirs:
             f["paired_msa_file_paths"] = str(paired_dirs[m.query])
