@@ -1,0 +1,68 @@
+{
+ "about": "Shared test vectors for the canonical sequence key. Canonical form: remove every character for which Python str.isspace() is true, uppercase, strip one trailing '*'. seq_sha256 is the lowercase hex sha256 of the UTF-8 bytes. Inputs in 'reject' must be refused (empty, or non-ASCII after whitespace removal).",
+ "accept": [
+  {
+   "input": "MKV",
+   "canonical": "MKV",
+   "seq_sha256": "06101e170c22fd1e3eb5769d9ec67e9b76a226c73f20c30aa46e2436cb60abce"
+  },
+  {
+   "input": "mkv\n",
+   "canonical": "MKV",
+   "seq_sha256": "06101e170c22fd1e3eb5769d9ec67e9b76a226c73f20c30aa46e2436cb60abce"
+  },
+  {
+   "input": " M K V* ",
+   "canonical": "MKV",
+   "seq_sha256": "06101e170c22fd1e3eb5769d9ec67e9b76a226c73f20c30aa46e2436cb60abce"
+  },
+  {
+   "input": "MKV**",
+   "canonical": "MKV*",
+   "seq_sha256": "7a6b28e35ba51a92c105cfec8f4002d323eee3b9e4c2d5cbc20c789200b69b34"
+  },
+  {
+   "input": "MK*V",
+   "canonical": "MK*V",
+   "seq_sha256": "0594e83d12dae5e04d0d7ab3f07b48ac25abae9529ec1e6f9e7deeae3a0d6f58"
+  },
+  {
+   "input": "MKVX",
+   "canonical": "MKVX",
+   "seq_sha256": "959867b987a2d005f14788317d19a2895d96338531f572efa67b9081e2ca559f"
+  },
+  {
+   "input": "mkt aYIAKQR*\n",
+   "canonical": "MKTAYIAKQR",
+   "seq_sha256": "0b2b6b8411d220f8648b67b5f839a4336470f4fc93d9604009a1cb3a093ae29e"
+  },
+  {
+   "input": "A\u00a0B\u2003C\u3000D",
+   "canonical": "ABCD",
+   "seq_sha256": "e12e115acf4552b2568b55e93cbd39394c4ef81c82447fafc997882a02d23677"
+  },
+  {
+   "input": "x\u001cy\u001fz\u0085w",
+   "canonical": "XYZW",
+   "seq_sha256": "bcdc6246308cf301e99d29c925b85a402d71dd5ee6df7d314b07dd1512c9fc53"
+  },
+  {
+   "input": "\tMKV\r\n*",
+   "canonical": "MKV",
+   "seq_sha256": "06101e170c22fd1e3eb5769d9ec67e9b76a226c73f20c30aa46e2436cb60abce"
+  },
+  {
+   "input": "M-K.V",
+   "canonical": "M-K.V",
+   "seq_sha256": "4a6e788763ec04f3288750f1cbec9850336e192dfc3215c69e17e17645f52644"
+  }
+ ],
+ "reject": [
+  "",
+  "   ",
+  "*",
+  " * ",
+  "MK\u00e9V",
+  "\u0130K"
+ ]
+}

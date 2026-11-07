@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scigantic-msa"
+version = "0.1.0"
+description = "Protein multiple sequence alignments for structure predictors, from published MSA sets, your Scigantic account, or a search server, written as ColabFold, AlphaFold 3, Boltz, Chai-1 or OpenFold3 input."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Scigantic" }]
+keywords = ["msa", "a3m", "protein", "alphafold3", "boltz", "chai", "colabfold", "openfold", "structure-prediction"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Environment :: Console",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Chai-1 reads aligned parquet files.
+chai = ["pyarrow>=12"]
+dev = ["pytest>=7", "pyarrow>=12", "mypy>=1.10", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://scigantic.com"
+Repository = "https://github.com/Scigantic/scigantic-msa"
+Issues = "https://github.com/Scigantic/scigantic-msa/issues"
+
+[project.scripts]
+scigantic-msa = "scigantic_msa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+scigantic_msa = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "mmseqs: needs the mmseqs binary on PATH",
+  "predictors: loads outputs with the predictors' own parsers (needs them installed)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = false
+ignore_missing_imports = true
