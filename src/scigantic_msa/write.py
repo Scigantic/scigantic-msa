@@ -39,7 +39,21 @@ def write_model(model: str, chains: List[Alignment], out: "str | Path", name: st
     # The adapters fall back to different names for "", so pick one here.
     name = name or "query"
     out = Path(out) / model
+    new = [p for p in (out, *out.parents) if not p.exists()]
     out.mkdir(parents=True, exist_ok=True)
+    try:
+        return _write(model, chains, out, name, quiet)
+    except BaseException:
+        # Do not leave empty folders behind when an adapter refuses the input.
+        for p in [out / "msas", *new]:
+            try:
+                p.rmdir()
+            except OSError:
+                pass
+        raise
+
+
+def _write(model: str, chains: List[Alignment], out: Path, name: str, quiet: bool) -> Tuple[List[str], str]:
     if model == "af3":
         AlphaFold3.prepare(chains, name=name, out_dir=out, quiet=quiet)
         p = out / f"{_fname(name)}.json"

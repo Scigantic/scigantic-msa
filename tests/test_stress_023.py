@@ -235,3 +235,13 @@ def test_attribution_still_written_for_chai(tmp_path):
     pytest.importorskip("pyarrow")
     Chai.prepare(MSA().from_a3m(deep(Q)), out_dir=tmp_path, quiet=True)
     assert json.loads((tmp_path / "scigantic-msa-attribution.json").read_text())["outputs"]
+
+
+def test_refused_input_leaves_no_empty_folders(tmp_path, capsys):
+    # Protenix refuses U before writing anything; the folders went with it.
+    a = tmp_path / "u.a3m"
+    a.write_text(f">101\n{Q[:30]}U{Q[31:]}\n")
+    out = tmp_path / "new" / "o"
+    assert main(["convert", str(a), "-m", "protenix", "-o", str(out)]) == 1
+    assert "U" in capsys.readouterr().err
+    assert not (tmp_path / "new").exists()
