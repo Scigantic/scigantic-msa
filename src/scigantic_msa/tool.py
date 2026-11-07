@@ -17,6 +17,7 @@ import gzip
 import logging
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -70,6 +71,7 @@ class MSA:
                 raise ValueError(f"unknown server {server!r}; choose one of {', '.join(BACKENDS)}")
             kw: Dict[str, Any] = {}
             if host:
+                check_host(host)
                 kw["host" if server == "colabfold" else "url"] = host
             backend = make_backend(server, **kw)
         self.backend = backend
@@ -84,6 +86,8 @@ class MSA:
         return str(self.backend.server_name)
 
     def describe_server(self) -> str:
+        if not _is_default_host(self.backend):
+            return f"{self.server_name} (a {self.server} server you chose, not the public one)"
         return f"{self.server_name} ({SERVERS.get(self.server, self.server)})"
 
     @property
@@ -173,6 +177,29 @@ class MSA:
         log.info(msg)
         if not self.quiet:
             print(f"scigantic-msa: {msg}", file=sys.stderr, flush=True)
+
+
+def check_host(host: str) -> None:
+    """Refuse a server URL that is not http(s)://host. A missing scheme
+    ("localhost:8080") gets an example of the right form."""
+    parts = urllib.parse.urlsplit(host)
+    if parts.scheme in ("http", "https"):
+        if parts.netloc:
+            return
+        raise ValueError(f"--host {host!r} has no host name")
+    if "://" in host:
+        raise ValueError(f"--host must start with http:// or https://, not {parts.scheme}://")
+    raise ValueError(f"--host needs http:// or https:// in front, for example http://{host}")
+
+
+def _is_default_host(backend: Any) -> bool:
+    from .remote import colabfold, nvidia
+
+    if backend.name == "colabfold" and hasattr(backend, "host"):
+        return str(backend.host).rstrip("/") == colabfold.DEFAULT_HOST
+    if backend.name == "nvidia" and hasattr(backend, "url"):
+        return str(backend.url) == nvidia.DEFAULT_URL
+    return True
 
 
 def protein_sequence(seq: str, i: int) -> str:

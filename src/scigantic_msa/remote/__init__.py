@@ -6,7 +6,7 @@ import sys
 import threading
 from typing import Any, Optional, Set
 
-from .colabfold import ColabFoldClient, RateLimited, RemoteError, RemoteResult
+from .colabfold import DEFAULT_HOST, ColabFoldClient, RateLimited, RemoteError, RemoteResult
 from .nvidia import NvidiaClient
 
 __all__ = [
@@ -42,7 +42,7 @@ def announce(backend: Any, stream: Optional[Any] = None) -> None:
             return
         _announced.add(key)
     msg = f"scigantic-msa: sending the sequence to {backend.server_name} ({backend.name} backend)."
-    if backend.name == "colabfold":
+    if backend.name == "colabfold" and str(getattr(backend, "host", DEFAULT_HOST)).rstrip("/") == DEFAULT_HOST:
         msg += " Results on that public server can be read by anyone who knows the sequence."
     if getattr(backend, "experimental", False):
         msg += " This backend is experimental."

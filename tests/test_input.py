@@ -256,3 +256,38 @@ def test_bom_on_stdin(fake, tmp_path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO(f"﻿>q\n{Q}\n"))
     assert run("-", "-m", "af3", "-o", str(tmp_path / "o"), "--yes") == 0
     assert fake.calls == [Q]
+
+
+# Item 12: --host must be an http(s) URL, and only the public server is
+# described as run by the ColabFold team.
+@pytest.mark.parametrize("host,msg", [
+    ("localhost:8080", "for example http://localhost:8080"),
+    ("ftp://example.org", "not ftp://"),
+    ("file:///etc/passwd", "not file://"),
+    ("http://", "no host name"),
+])
+def test_bad_host_is_refused(tmp_path, capsys, monkeypatch, host, msg):
+    import socket
+
+    def no_net(*a, **k):
+        raise AssertionError("tried to open a connection")
+    monkeypatch.setattr(socket.socket, "connect", no_net)
+    monkeypatch.setattr(socket, "create_connection", no_net)
+    assert run(Q, "-m", "af3", "-o", str(tmp_path / "o"), "--yes", "--host", host) == 1
+    err = capsys.readouterr().err
+    assert msg in err and "This sends" not in err
+
+
+def test_host_wording(monkeypatch):
+    from scigantic_msa.remote import announce
+    monkeypatch.delenv("SCIGANTIC_MSA_COLABFOLD_URL")
+    assert "ColabFold team" in MSA().describe_server()
+    own = MSA(host="http://10.0.0.5:8080")
+    d = own.describe_server()
+    assert d.startswith("10.0.0.5:8080") and "ColabFold team" not in d and "you chose" in d
+    buf = io.StringIO()
+    announce(own.backend, buf)
+    assert "public server" not in buf.getvalue()
+    buf = io.StringIO()
+    announce(MSA().backend, buf)
+    assert "public server" in buf.getvalue()
