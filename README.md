@@ -56,7 +56,7 @@ scigantic-msa run SEQ_OR_FASTA --model boltz --out job/
 scigantic-msa run chains.fasta --complex --model af3 --out job/ --yes
 scigantic-msa run many.fasta --batch --model boltz --out jobs/
 scigantic-msa convert my_alignment.a3m --model protenix --out job/
-scigantic-msa version
+scigantic-msa --version
 ```
 
 `--model` is one of `af3`, `boltz`, `chai`, `colabfold`, `openfold3`,

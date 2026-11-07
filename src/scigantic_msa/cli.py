@@ -2,7 +2,7 @@
 
     scigantic-msa run SEQ_OR_FASTA --model boltz --out DIR [--server colabfold|nvidia] [--yes]
     scigantic-msa convert ALIGNMENT.a3m [MORE.a3m ...] --model af3 --out DIR [--uniprot U.sto ...]
-    scigantic-msa version
+    scigantic-msa version   (or --version)
 
 ``run`` sends the sequence to the search server and asks once before it
 does (``--yes`` skips the question). ``convert`` reads alignments you
@@ -379,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="scigantic-msa",
         description="Get a protein MSA once and write the input files for a structure predictor.")
+    p.add_argument("--version", action="version", version=f"scigantic-msa {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="search a server for the MSA, then write the model's input")

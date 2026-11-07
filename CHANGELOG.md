@@ -16,6 +16,10 @@ Changes you may notice:
   `<out>/run1_<record>/<model>/` and names the job `run1_<record>` in every
   model's files. Before, it was ignored.
 
+Fixes:
+
+- `scigantic-msa --version` works, as well as `scigantic-msa version`.
+
 ## 0.2.3
 
 Changes you may notice:

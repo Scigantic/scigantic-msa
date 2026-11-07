@@ -8,7 +8,7 @@ import pytest
 
 from conftest import REAL
 from test_input import Q, Q2, FakeBackend
-from scigantic_msa import MSA
+from scigantic_msa import MSA, __version__
 from scigantic_msa.adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, Protenix
 from scigantic_msa.cli import MODELS, main
 from scigantic_msa.writers import ATTRIBUTION_FILE
@@ -157,3 +157,12 @@ def test_batch_without_name_is_unchanged(fake, tmp_path):
     f.write_text(f">a\n{Q}\n>\n{Q2}\n")
     assert main(["run", str(f), "-m", "boltz", "-o", str(tmp_path / "o"), "--yes", "--batch", "-q"]) == 0
     assert sorted(p.name for p in (tmp_path / "o").iterdir()) == ["a", "job2"]
+
+
+def test_version_flag(capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["--version"])
+    assert e.value.code == 0
+    assert capsys.readouterr().out.strip() == f"scigantic-msa {__version__}"
+    assert main(["version"]) == 0
+    assert capsys.readouterr().out.strip() == f"scigantic-msa {__version__}"
