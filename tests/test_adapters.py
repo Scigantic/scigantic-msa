@@ -239,7 +239,7 @@ def test_protenix_no_pairing_file_when_chains_share_no_species(tmp_path, capsys)
     a, b = real_alignment(Q_1HVW, with_uniprot=True), real_alignment(Q_1PXQ, with_uniprot=True)
     jobs = Protenix.prepare([a, b], out_dir=tmp_path)
     assert all("pairedMsaPath" not in s["proteinChain"] for s in jobs[0]["sequences"])
-    assert "no species is shared" in capsys.readouterr().err
+    assert "no two chains share a species" in capsys.readouterr().err
 
 
 # The Protenix checks. A past Protenix run silently ignored a paired MSA file

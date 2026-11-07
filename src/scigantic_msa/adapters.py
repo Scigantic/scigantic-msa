@@ -422,6 +422,24 @@ def _protenix_pairing_rows(m: Alignment) -> List[Row]:
     return out
 
 
+def _protenix_pairing(msas: Sequence[Alignment]) -> Dict[str, List[Row]]:
+    """The pairing.a3m rows for each distinct chain that shares a species
+    with another chain. Protenix pairs a species found in two or more chains
+    (``pair_chains_by_species``), so a chain with no species, or a species
+    missing from one chain, does not stop the other chains pairing."""
+    if len(msas) < 2:
+        return {}
+    rows = {m.query: _protenix_pairing_rows(m) for m in msas}
+    species = {q: {protenix_species(r.header) for r in rs[1:]} for q, rs in rows.items()}
+    counts: Dict[str, int] = {}
+    for ss in species.values():
+        for s in ss:
+            counts[s] = counts.get(s, 0) + 1
+    shared = {s for s, n in counts.items() if n > 1}
+    out = {q: rs for q, rs in rows.items() if species[q] & shared}
+    return out if len(out) > 1 else {}
+
+
 def _protenix_accession(header: str) -> str:
     """An accession for a ``UniRef100_<acc>_<taxid>/`` header: the first word
     without a ``UniRef100_`` / ``UniRef90_`` prefix, or the accession of a
@@ -472,13 +490,15 @@ class Protenix:
         d = _out(out_dir)
         dist = _distinct(chains)
         msas = [m for m, _ in dist]
-        pr = _pairing_note(msas, quiet)
-        pairing: Dict[str, List[Row]] = {}
-        if pr is not None and pr.n_paired:
-            pairing = {m.query: _protenix_pairing_rows(m) for m in msas}
-            if any(len(rows) < 2 for rows in pairing.values()):
-                pairing = {}
-                _say("Protenix gets no pairing.a3m: some chain has no rows with a species Protenix can read", quiet)
+        pairing = _protenix_pairing(msas)
+        notes = []
+        if len(msas) > 1:
+            if pairing:
+                notes.append(f"pairing.a3m written for {len(pairing)} of {len(msas)} chains; Protenix pairs "
+                             "them by species itself, including species found in only some of the chains")
+            else:
+                notes.append("no pairing.a3m: no two chains share a species Protenix can read")
+            _say(f"Protenix: {notes[0]}", quiet)
         seqs = []
         for m, idx in dist:
             cdir = d / m.seq_sha256
@@ -490,7 +510,7 @@ class Protenix:
                 writers._atomic_write(paired, format_a3m(pairing[m.query]))
                 pc["pairedMsaPath"] = str(paired)
             seqs.append({"proteinChain": pc})
-        writers._sidecar(d, chains, [pr.message] if pr is not None else [],
+        writers._sidecar(d, chains, notes,
                          {m.seq_sha256: [n for n in PROTENIX_FILES if (d / m.seq_sha256 / n).is_file()] for m in msas})
         # Protenix makes an output directory from the job name.
         jobs = [{"name": _safe_name(name), "sequences": seqs}]
