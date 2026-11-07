@@ -1,4 +1,4 @@
-"""Remote MSA search backends. None of them is used unless you turn it on."""
+"""Remote MSA search backends. A sequence goes to one only when you ask with remote=True."""
 from __future__ import annotations
 
 import os
@@ -35,13 +35,13 @@ def make_backend(name: str, **kw: Any):
 
 
 def announce(backend: Any, stream: Optional[Any] = None) -> None:
-    """Say once per process which server sequences are going to."""
+    """Say once per process which server the sequences are going to."""
     key = f"{backend.name}:{backend.server_name}"
     with _lock:
         if key in _announced:
             return
         _announced.add(key)
-    msg = f"scigantic-msa: sending sequences with no stored MSA to {backend.server_name} ({backend.name} backend)."
+    msg = f"scigantic-msa: sending the sequence to {backend.server_name} ({backend.name} backend)."
     if backend.name == "colabfold":
         msg += " Results on that public server can be read by anyone who knows the sequence."
     if getattr(backend, "experimental", False):

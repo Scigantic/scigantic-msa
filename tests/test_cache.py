@@ -58,9 +58,9 @@ def test_lock_excludes_other_processes(tmp_path):
 
 def _worker(env, q):
     os.environ.update(env)
-    from scigantic_msa import get_msa
+    from scigantic_msa import MSA
 
-    m = get_msa(Q_LIVE, remote="colabfold", quiet=True)
+    m = MSA(quiet=True).get(Q_LIVE, remote=True)
     q.put(m.source)
 
 
@@ -73,7 +73,7 @@ def test_parallel_jobs_submit_once(server, tmp_path, monkeypatch):
     tar = fake.tar
     server.route_prefix("GET", "/result/download/", lambda r: (time.sleep(1.0), (200, {}, tar))[1])
     env = {k: v for k, v in os.environ.items() if k.startswith("SCIGANTIC_")}
-    env.update({"SCIGANTIC_MSA_COLABFOLD_URL": server.url, "SCIGANTIC_MSA_INDEX_URL": "http://127.0.0.1:9/"})
+    env.update({"SCIGANTIC_MSA_COLABFOLD_URL": server.url})
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     ps = [ctx.Process(target=_worker, args=(env, q)) for _ in range(2)]
