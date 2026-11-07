@@ -71,7 +71,8 @@ def write_model(model: str, chains: List[Alignment], out: Path, name: str, quiet
         AlphaFold3.prepare(chains, name=name, out_dir=out, quiet=quiet)
         p = out / f"{_fname(name)}.json"
         flag = " --resolve_msa_overlaps=false" if len({c.query for c in chains}) > 1 else ""
-        return [str(p)], f"python run_alphafold.py --json_path={p} --output_dir={out / 'pred'}{flag}"
+        return [str(p)], (f"python run_alphafold.py --json_path={p} --model_dir=WEIGHTS "
+                          f"--output_dir={out / 'pred'} --norun_data_pipeline{flag}")
     if model == "boltz":
         yaml = Boltz.prepare(chains, out_dir=out / "msas", quiet=quiet)
         p = out / f"{_fname(name)}.yaml"
@@ -89,7 +90,7 @@ def write_model(model: str, chains: List[Alignment], out: Path, name: str, quiet
         q = OpenFold3.prepare(chains, out_dir=out / "msas", name=name, quiet=quiet)
         p = out / f"{_fname(name)}.json"
         p.write_text(json.dumps(q, indent=2) + "\n")
-        return [str(p), str(out / "msas")], f"run_openfold predict --query_json {p} --output_dir {out / 'pred'}"
+        return [str(p), str(out / "msas")], f"run_openfold predict --query_json {p} --use_msa_server false --output_dir {out / 'pred'}"
     if model == "protenix":
         jobs = Protenix.prepare(chains, out_dir=out / "msas", name=name, quiet=quiet)
         p = out / f"{_fname(name)}.json"
