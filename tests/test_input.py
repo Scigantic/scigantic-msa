@@ -291,3 +291,15 @@ def test_host_wording(monkeypatch):
     buf = io.StringIO()
     announce(MSA().backend, buf)
     assert "public server" in buf.getvalue()
+
+
+def test_bad_letters_name_a_short_argument_but_never_echo_a_long_one(fake, tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert run("mono.fsta", "-m", "boltz", "-o", str(tmp_path / "o"), "--yes") == 1
+    assert "No file named 'mono.fsta'" in capsys.readouterr().err
+    long_seq = Q[:50] + "1" + Q[50:]
+    assert run(long_seq, "-m", "boltz", "-o", str(tmp_path / "o"), "--yes") == 1
+    err = capsys.readouterr().err
+    assert "not amino acid letters" in err
+    assert Q[:20] not in err and Q[-20:] not in err
+    assert fake.calls == []

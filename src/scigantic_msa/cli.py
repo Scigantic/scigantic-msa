@@ -122,7 +122,9 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
     try:
         recs = [(n, [protein_sequence(c, i) for i, c in enumerate(cs, 1)]) for n, cs in recs]
     except InvalidSequence as e:
-        if typed:
+        if typed and (len(arg) <= 40 or os.sep in arg):
+            # Name the argument only when it could be a file name, so a long
+            # mistyped sequence is not echoed back to the terminal or a log.
             raise InvalidSequence(f"{e}. No file named {arg!r} exists either.") from None
         raise
     if typed:
