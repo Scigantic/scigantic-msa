@@ -55,6 +55,10 @@ markers = [
 line-length = 120
 target-version = "py310"
 
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501", "E741", "B904", "B008", "B905"]
+
 [tool.mypy]
 python_version = "3.10"
 warn_unused_ignores = false

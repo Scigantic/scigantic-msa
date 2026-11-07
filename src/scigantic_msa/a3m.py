@@ -158,7 +158,7 @@ def parse_a3m(
     rows: List[Row] = []
     declared_len: Optional[int] = None
     qrow: Optional[str] = None
-    for i, (header, seq) in enumerate(_records(text, skip_comments=skip_comments, what=what)):
+    for header, seq in _records(text, skip_comments=skip_comments, what=what):
         if header == "#len":
             declared_len = int(seq)
             continue
@@ -277,15 +277,16 @@ def parse_stockholm(
     """Convert a Stockholm alignment to A3M rows.
 
     Columns where the first sequence has a gap become insertions: residues
-    there are lowercased and gaps dropped. ``max_rows`` stops reading once that
-    many rows (query included) are complete; this only works for single-block
-    files, which is what OpenFold3 and jackhmmer write. A file cut short in
-    the middle of an interleaved block fails the query check instead of
+    there are lowercased and gaps dropped. ``max_rows`` keeps only the first
+    that many sequences (query included). Interleaved files (several blocks of
+    columns, as jackhmmer writes for wide alignments) are joined by name; a
+    file cut short inside a block fails the width or query check instead of
     returning a short alignment.
     """
     order: List[str] = []
     seqs: dict = {}
     desc: dict = {}
+    skipped: set = set()
     started = False
     blocks = 0
     in_block = False
@@ -318,6 +319,8 @@ def parse_stockholm(
         if not in_block:
             in_block = True
             blocks += 1
+        if name in skipped:
+            continue
         if name in seqs:
             if blocks == 1:
                 raise A3MError(f"{what}: sequence name {name!r} appears twice in one block")
@@ -326,7 +329,8 @@ def parse_stockholm(
             if blocks > 1:
                 raise A3MError(f"{what}: name {name!r} first appears in block {blocks}")
             if max_rows is not None and len(order) >= max_rows:
-                break
+                skipped.add(name)
+                continue
             order.append(name)
             seqs[name] = [aln]
     if not started:
