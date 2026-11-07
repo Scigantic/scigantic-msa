@@ -3,21 +3,18 @@
 Layout under the cache directory (``SCIGANTIC_MSA_CACHE``, else
 ``$XDG_CACHE_HOME/scigantic-msa``, else ``~/.cache/scigantic-msa``)::
 
-    alignments/<aa>/<seq_sha256>/<backend>--<dbkey>.msa.gz   computed MSAs
-    index/...                                                 index shards
-    files/<aa>/<urlhash>                                      fetched alignment files
+    alignments/<aa>/<seq_sha256>/<backend>--<dbkey>.msa.gz
 
 Writes go to a temporary file in the same directory and are renamed into
 place, so a reader never sees half a file. A per-key lock file stops two
 parallel jobs from computing the same alignment twice.
 
-On Scigantic notebooks the cache sits under ``~/.cache``, which the home
-snapshot skips, so cached alignments are not copied anywhere.
+Delete the directory to forget every alignment. Nothing in it is sent
+anywhere.
 """
 from __future__ import annotations
 
 import errno
-import hashlib
 import os
 import sys
 import tempfile
@@ -28,7 +25,7 @@ from typing import IO, TYPE_CHECKING, List, Optional
 if TYPE_CHECKING:  # pragma: no cover
     from .alignment import Alignment
 
-__all__ = ["cache_dir", "atomic_write", "FileLock", "AlignmentCache", "FileCache"]
+__all__ = ["cache_dir", "atomic_write", "FileLock", "AlignmentCache"]
 
 
 def cache_dir() -> Path:
@@ -204,31 +201,3 @@ class AlignmentCache:
             except OSError:
                 pass
         return n
-
-
-class FileCache:
-    """Raw bytes of index-listed alignment files, keyed by URL and length."""
-
-    def __init__(self, root: Optional[Path] = None):
-        self.root = (root or cache_dir()) / "files"
-
-    def path(self, url: str, offset: int, length: int) -> Path:
-        h = hashlib.sha256(f"{url}\n{offset}\n{length}".encode()).hexdigest()
-        return self.root / h[:2] / h
-
-    def get(self, url: str, offset: int, length: int) -> Optional[bytes]:
-        p = self.path(url, offset, length)
-        try:
-            data = p.read_bytes()
-        except OSError:
-            return None
-        if len(data) != length:
-            try:
-                p.unlink()
-            except OSError:
-                pass
-            return None
-        return data
-
-    def put(self, url: str, offset: int, length: int, data: bytes) -> None:
-        atomic_write(self.path(url, offset, length), data)

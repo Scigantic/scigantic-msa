@@ -1,17 +1,14 @@
-"""Small HTTP layer on the standard library.
+"""Small HTTP layer on the standard library, used only to talk to the MSA
+server you chose.
 
 - Retries 429, 5xx, timeouts and dropped connections with exponential
   backoff, and honours Retry-After (seconds or an HTTP date) up to a cap.
-- Range reads check the status and Content-Range; a server that ignores
-  Range and returns the whole object is sliced, and a short body is an error.
 - Authorization headers are dropped when a redirect leaves the original host.
-- Paths and file:// URLs are read from disk the same way.
 """
 from __future__ import annotations
 
 import email.utils
 import http.client
-import os
 import random
 import socket
 import time
@@ -19,8 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
-from typing import IO, Callable, Dict, Iterator, Mapping, Optional, Tuple
+from typing import Callable, Mapping, Optional, Tuple
 
 from . import __version__
 
@@ -106,15 +102,6 @@ DEFAULT_RETRY = RetryPolicy()
 _sleep: Callable[[float], None] = time.sleep
 
 
-def _auth_headers_for(url: str) -> Dict[str, str]:
-    host = urllib.parse.urlsplit(url).hostname or ""
-    if host == "huggingface.co" or host.endswith(".huggingface.co"):
-        tok = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
-        if tok:
-            return {"Authorization": f"Bearer {tok}"}
-    return {}
-
-
 def request(
     method: str,
     url: str,
@@ -132,7 +119,6 @@ def request(
     raised as HTTPError (404 as NotFound).
     """
     hdrs = {"User-Agent": USER_AGENT}
-    hdrs.update(_auth_headers_for(url))
     if headers:
         hdrs.update(headers)
     last: Optional[BaseException] = None
@@ -191,124 +177,6 @@ def request(
 def _short(url: str) -> str:
     p = urllib.parse.urlsplit(url)
     return f"{p.scheme}://{p.netloc}{p.path}" if p.scheme else url
-
-
-def is_local(url: str) -> bool:
-    return url.startswith("file://") or not urllib.parse.urlsplit(url).scheme or (
-        len(url) > 1 and url[1] == ":"  # Windows drive letter
-    )
-
-
-def local_path(url: str) -> Path:
-    if url.startswith("file://"):
-        return Path(urllib.request.url2pathname(urllib.parse.urlsplit(url).path))
-    return Path(url)
-
-
-def get_bytes(
-    url: str,
-    *,
-    offset: int = 0,
-    length: Optional[int] = None,
-    timeout: float = 60.0,
-    retry: RetryPolicy = DEFAULT_RETRY,
-) -> bytes:
-    """Read ``length`` bytes at ``offset`` (or the whole object). The result is
-    exactly ``length`` bytes or an error is raised."""
-    if is_local(url):
-        p = local_path(url)
-        try:
-            with open(p, "rb") as fh:
-                fh.seek(offset)
-                body = fh.read() if length is None else fh.read(length)
-        except FileNotFoundError:
-            raise NotFound(f"{p} does not exist", 404, url) from None
-        if length is not None and len(body) != length:
-            raise HTTPError(f"{p}: wanted {length} bytes at {offset}, file has {len(body)}", 0, url)
-        return body
-    headers = {}
-    ranged = offset > 0 or length is not None
-    if ranged:
-        end = "" if length is None else str(offset + length - 1)
-        headers["Range"] = f"bytes={offset}-{end}"
-    resp = request("GET", url, headers=headers, timeout=timeout, retry=retry)
-    body = resp.body
-    if resp.status == 206:
-        cr = resp.headers.get("Content-Range") or resp.headers.get("content-range") or ""
-        start = _content_range_start(cr)
-        if start is not None and start != offset:
-            raise HTTPError(f"{_short(url)}: asked for offset {offset}, got Content-Range {cr!r}", 206, url)
-    elif resp.status == 200:
-        if ranged:
-            body = body[offset:] if length is None else body[offset : offset + length]
-    else:
-        raise HTTPError(f"{_short(url)}: unexpected HTTP {resp.status}", resp.status, url)
-    if length is not None and len(body) != length:
-        raise HTTPError(
-            f"{_short(url)}: wanted {length} bytes, received {len(body)}", resp.status, url
-        )
-    return body
-
-
-def _content_range_start(cr: str) -> Optional[int]:
-    # "bytes 0-99/1234"
-    try:
-        unit, rest = cr.split(" ", 1)
-        return int(rest.split("-", 1)[0])
-    except (ValueError, IndexError):
-        return None
-
-
-def open_stream(url: str, *, offset: int = 0, timeout: float = 60.0) -> IO[bytes]:
-    """Open a readable stream from ``offset`` to the end. The caller closes it.
-    Used for big Stockholm files we stop reading early."""
-    if is_local(url):
-        fh = open(local_path(url), "rb")
-        fh.seek(offset)
-        return fh
-    hdrs = {"User-Agent": USER_AGENT}
-    hdrs.update(_auth_headers_for(url))
-    if offset:
-        hdrs["Range"] = f"bytes={offset}-"
-    req = urllib.request.Request(url, headers=hdrs)
-    last: Optional[BaseException] = None
-    for attempt in range(DEFAULT_RETRY.attempts):
-        try:
-            r = _opener.open(req, timeout=timeout)
-        except urllib.error.HTTPError as e:
-            if e.code not in RETRY_STATUSES or attempt == DEFAULT_RETRY.attempts - 1:
-                raise HTTPError(f"HTTP {e.code} from {_short(url)}", e.code, url) from None
-            last = e
-        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
-            last = e
-            if attempt == DEFAULT_RETRY.attempts - 1:
-                break
-        else:
-            if offset and r.status == 200:
-                # Range ignored: skip to the offset ourselves.
-                remaining = offset
-                while remaining:
-                    chunk = r.read(min(remaining, 1 << 20))
-                    if not chunk:
-                        raise HTTPError(f"{_short(url)}: shorter than offset {offset}", 200, url)
-                    remaining -= len(chunk)
-            return r
-        _sleep(min(DEFAULT_RETRY.max_delay, DEFAULT_RETRY.base_delay * (2**attempt)))
-    raise HTTPError(f"could not reach {_short(url)}: {last}", 0, url)
-
-
-def iter_lines(stream: IO[bytes], chunk: int = 1 << 16) -> Iterator[bytes]:
-    buf = b""
-    while True:
-        data = stream.read(chunk)
-        if not data:
-            break
-        buf += data
-        *lines, buf = buf.split(b"\n")
-        for line in lines:
-            yield line
-    if buf:
-        yield buf
 
 
 def split_url(url: str) -> Tuple[str, str]:
