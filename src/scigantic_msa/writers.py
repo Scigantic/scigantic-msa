@@ -8,6 +8,15 @@ Format rules are from the predictors' own parsers: AlphaFold 3
 ``folding_input.py``, Boltz ``parse/csv.py`` and ``main.py``, Chai-1
 ``aligned_pqt.py``, ColabFold ``input.py`` and OpenFold3
 ``dataset_config_components.py``.
+
+A chain with no species information has ``None`` for every paired row (see
+:mod:`scigantic_msa.pairing`). Each writer fills that in as its model does
+for a chain missing from a species: gaps in the ColabFold paired rows and in
+OpenFold3's ``colabfold_paired.a3m`` (both as ColabFold's own pairing writes
+them), one gap row per key for Chai-1 (it pairs a key only when every chain
+with an MSA has it), no key for Boltz (it fills the chain with its next
+unpaired row), and nothing for AlphaFold 3 (its unpaired rows stay as they
+are).
 """
 from __future__ import annotations
 
@@ -109,6 +118,11 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
     _atomic_write(directory / ATTRIBUTION_FILE, json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 
+def _gap_row(m: Alignment, k: int) -> Row:
+    """A gap-only row standing in for a chain that has no row for pair ``k``."""
+    return Row(f"gap_{k} no species information", "-" * len(m.query), "gap")
+
+
 def _unpaired_with_prepaired(m: Alignment, paired: List[Row]) -> List[Row]:
     """Query, then the paired rows in order, then the remaining rows."""
     used = {id(r) for r in paired}
@@ -142,8 +156,9 @@ def write_colabfold(chains: Sequence[Alignment], path: "str | Path", *, pairing:
         out = [f"#{','.join(map(str, lens))}\t{','.join(map(str, cards))}",
                ">" + "\t".join(names), "".join(m.query for m in msas)]
         for k in range(pr.n_paired):
-            out.append(">" + "\t".join(pr.rows[c][k].header.split("\t")[0] for c in range(len(msas))))
-            out.append("".join(pr.rows[c][k].seq for c in range(len(msas))))
+            row = [pr.rows[c][k] or _gap_row(msas[c], k + 1) for c in range(len(msas))]
+            out.append(">" + "\t".join(r.header.split("\t")[0] for r in row))
+            out.append("".join(r.seq for r in row))
         total = sum(lens)
         offset = 0
         for c, m in enumerate(msas):
@@ -211,7 +226,8 @@ def write_af3_json(
             notes.append(pr.message)
             if pr.n_paired:
                 for c, m in enumerate(msas):
-                    unpaired_rows[m.query] = _unpaired_with_prepaired(m, pr.rows[c])
+                    if c not in pr.chains_without_species:
+                        unpaired_rows[m.query] = _unpaired_with_prepaired(m, [r for r in pr.rows[c] if r])
                 notes.append(
                     "rows paired by taxid are first in unpairedMsa; run AlphaFold 3 with "
                     "--resolve_msa_overlaps=false so it keeps them"
@@ -329,8 +345,9 @@ def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing
         for c, m in enumerate(msas):
             lines = ["key,sequence", f"-1,{m.query}"]
             for k, r in enumerate(pr.rows[c], 1):
-                lines.append(f"{k},{r.seq}")
-            used = {id(r) for r in pr.rows[c]}
+                if r is not None:
+                    lines.append(f"{k},{r.seq}")
+            used = {id(r) for r in pr.rows[c] if r is not None}
             for r in m.rows[1:]:
                 if id(r) not in used:
                     lines.append(f"-1,{r.seq}")
@@ -383,12 +400,12 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
         if name != m.seq_sha256 + ".aligned.pqt":
             raise AssertionError("Chai-1 file name does not match seq_sha256")
         keyed: Dict[int, str] = {}
-        if pr is not None:
-            for k, r in enumerate(pr.rows[c], 1):
-                keyed[id(r)] = str(k)
         rows = [m.rows[0]]
         if pr is not None:
-            rows += pr.rows[c]
+            for k, r in enumerate(pr.rows[c], 1):
+                r = r or _gap_row(m, k)
+                keyed[id(r)] = str(k)
+                rows.append(r)
         used = {id(r) for r in rows}
         rows += [r for r in m.rows[1:] if id(r) not in used]
         seqs, srcs, keys, comments = [], [], [], []
@@ -442,7 +459,8 @@ def write_openfold3(chains: Sequence[Alignment], directory: "str | Path", *, pai
             cid = hashlib.sha256("|".join(m.seq_sha256 for m in msas).encode()).hexdigest()[:16]
             for c, m in enumerate(msas):
                 pdir = d / "paired" / cid / m.seq_sha256
-                _atomic_write(pdir / "colabfold_paired.a3m", format_a3m([m.rows[0]] + pr.rows[c]))
+                rows = [r or _gap_row(m, k) for k, r in enumerate(pr.rows[c], 1)]
+                _atomic_write(pdir / "colabfold_paired.a3m", format_a3m([m.rows[0]] + rows))
                 paired_dirs[m.query] = pdir
     elif len(msas) > 1:
         notes.append("uniprot_hits.a3m written for every chain; OpenFold3 pairs them by species")

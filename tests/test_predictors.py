@@ -105,3 +105,34 @@ def test_boltz_and_chai_read_a_real_colabfold_result(tmp_path):
     Chai.prepare(m, out_dir=tmp_path / "c")
     res = _run(chai_py, "check_chai.py", tmp_path / "c", m.query)[0]
     assert res["files"][0]["length"] == len(m.query) and res["files"][0]["depth"] > 1000
+
+
+def _species_less_trio(chains):
+    """Two real chains that pair by species, and a real ColabFold MSA with no
+    species in any row."""
+    return chains(Q_7M22A, want_uniprot=True), chains(Q_7M22C, want_uniprot=True), chains(Q_LITEFOLD)
+
+
+def test_boltz_pairs_two_chains_when_the_third_has_no_species(chains, tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_BOLTZ_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_BOLTZ_PYTHON to an interpreter with boltz installed")
+    a, b, c = _species_less_trio(chains)
+    files = _msa_paths(Boltz.prepare([a, b, c], out_dir=tmp_path, quiet=True))
+    res = _run(py, "check_boltz.py", *files)
+    ta, tb, tc = (set(r["taxonomy"]) - {-1} for r in res)
+    assert len(ta & tb) == pair_by_species([a, b]).n_paired == 8
+    assert tc == set()
+
+
+def test_chai_pairs_two_chains_when_the_third_has_no_species(chains, tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_CHAI_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_CHAI_PYTHON to an interpreter with chai_lab installed")
+    pytest.importorskip("pyarrow")
+    a, b, c = _species_less_trio(chains)
+    Chai.prepare([a, b, c], out_dir=tmp_path, quiet=True)
+    res = _run(py, "check_chai.py", tmp_path, a.query, b.query, c.query)[0]
+    # Chai counts the query as a paired row.
+    assert res["paired_rows"] == pair_by_species([a, b]).n_paired + 1 == 9
+    assert [f["length"] for f in res["files"]] == [len(a.query), len(b.query), len(c.query)]

@@ -104,10 +104,18 @@ def _say(msg: str, quiet: bool) -> None:
         print(f"scigantic-msa: {msg}", file=sys.stderr, flush=True)
 
 
-def _pairing_note(msas: Sequence[Alignment], quiet: bool) -> Optional[Pairing]:
+def _chain_names(chains: Sequence[Alignment]) -> List[str]:
+    """For each distinct sequence, the chain ids that have it ("B, D")."""
+    return [", ".join(chain_id(i) for i in idx) for _, idx in _distinct(chains)]
+
+
+def _pairing_note(chains: Sequence[Alignment], quiet: bool) -> Optional[Pairing]:
+    """Pair the distinct sequences of ``chains`` and say how it went, naming
+    chains by id, including any chain left unpaired."""
+    msas = [m for m, _ in _distinct(chains)]
     if len(msas) < 2:
         return None
-    pr = pair_by_species(msas)
+    pr = pair_by_species(msas, names=_chain_names(chains))
     _say(pr.message, quiet)
     return pr
 
@@ -163,17 +171,19 @@ class AlphaFold3:
         if out_dir is not None:
             d = _out(out_dir)
             path = d / f"{_safe_name(name or 'input')}.json"
-        # AlphaFold 3 keeps dots in the output directory it makes from the
-        # name, so a name of ".." would write outside --output_dir.
-        doc = writers.write_af3_json(chains, path, input=input, name=_safe_name(name) if name else None)
         msas = [m for m, _ in _distinct(chains)]
+        pr = None
         if len(msas) > 1:
             if all(m.uniprot_rows and len(m.uniprot_rows) > 1 for m in msas):
                 _say("pairedMsa holds UniProt rows; AlphaFold 3 pairs them by species", quiet)
             else:
-                pr = _pairing_note(msas, quiet)
+                pr = _pairing_note(chains, quiet)
                 if pr is not None and pr.n_paired:
                     _say("run AlphaFold 3 with --resolve_msa_overlaps=false so it keeps the paired rows", quiet)
+        # AlphaFold 3 keeps dots in the output directory it makes from the
+        # name, so a name of ".." would write outside --output_dir.
+        doc = writers.write_af3_json(chains, path, input=input, name=_safe_name(name) if name else None,
+                                     pairing=pr)
         for entry in doc.get("sequences", []):
             prot = entry.get("protein")
             if isinstance(prot, dict) and isinstance(prot.get("unpairedMsa"), str) and prot["unpairedMsa"]:
@@ -208,8 +218,7 @@ class Boltz:
         chains = _chains(results, sequence)
         d = _out(out_dir)
         dist = _distinct(chains)
-        msas = [m for m, _ in dist]
-        pr = _pairing_note(msas, quiet)
+        pr = _pairing_note(chains, quiet)
         lines = writers.write_boltz(chains, d, pairing=pr)
         paths = {m.query: Path(lines[idx[0]].split("msa: ", 1)[1]) for m, idx in dist}
         for m, _ in dist:
@@ -267,8 +276,7 @@ class Chai:
         ``chai-lab fold --msa-directory``."""
         chains = _chains(results, sequence)
         d = _out(out_dir)
-        msas = [m for m, _ in _distinct(chains)]
-        pr = _pairing_note(msas, quiet)
+        pr = _pairing_note(chains, quiet)
         written = writers.write_chai(chains, d, pairing=pr)
         import pyarrow.parquet as pq
 
@@ -309,7 +317,7 @@ class ColabFold:
         chains = _chains(results, sequence)
         d = _out(out_dir)
         msas = [m for m, _ in _distinct(chains)]
-        pr = _pairing_note(msas, quiet)
+        pr = _pairing_note(chains, quiet)
         p = writers.write_colabfold(chains, d / f"{_safe_name(name)}.a3m", pairing=pr)
         if len(msas) == 1:
             _verify_a3m(p, msas[0].query, what="ColabFold")
@@ -347,7 +355,7 @@ class OpenFold3:
         dist = _distinct(chains)
         msas = [m for m, _ in dist]
         all_uniprot = all(m.uniprot_rows and len(m.uniprot_rows) > 1 for m in msas)
-        pr = _pairing_note(msas, quiet) if not all_uniprot else None
+        pr = _pairing_note(chains, quiet) if not all_uniprot else None
         fields = writers.write_openfold3(chains, d, pairing=pr)
         by_seq = {m.query: f for m, f in zip(chains, fields)}
         out_chains = []
@@ -364,7 +372,10 @@ class OpenFold3:
             }
             if "paired_msa_file_paths" in f:
                 pdir = Path(f["paired_msa_file_paths"])
-                n_paired.add(_verify_a3m(pdir / "colabfold_paired.a3m", m.query, what="OpenFold3"))
+                pfile = pdir / "colabfold_paired.a3m"
+                _verify_a3m(pfile, m.query, what="OpenFold3")
+                # Count records as OpenFold3 does: gap-only rows count too.
+                n_paired.add(sum(l.startswith(">") for l in pfile.read_text(encoding="utf-8").splitlines()))
                 entry["paired_msa_file_paths"] = str(pdir)
             out_chains.append(entry)
         if len(n_paired) > 1:
@@ -496,6 +507,12 @@ class Protenix:
             if pairing:
                 notes.append(f"pairing.a3m written for {len(pairing)} of {len(msas)} chains; Protenix pairs "
                              "them by species itself, including species found in only some of the chains")
+                left = [n for (m, _), n in zip(dist, _chain_names(chains)) if m.query not in pairing]
+                if left:
+                    many = len(left) > 1 or ", " in left[0]
+                    notes[-1] += (f"; {'chains' if many else 'chain'} {', '.join(left)} "
+                                  f"{'get' if many else 'gets'} no pairing.a3m "
+                                  f"({'they share' if many else 'it shares'} no species with another chain)")
             else:
                 notes.append("no pairing.a3m: no two chains share a species Protenix can read")
             _say(f"Protenix: {notes[0]}", quiet)
