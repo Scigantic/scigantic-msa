@@ -27,6 +27,12 @@ def chains():
 @pytest.mark.parametrize("model", MODELS)
 def test_every_model_writes_files_and_a_next_command(model, chains, tmp_path):
     """One call per model, no per-adapter keywords to learn."""
+    if model == "chai":
+        # Chai-1 files are parquet. The stdlib-only CI job installs without
+        # the [chai] extra on purpose, to hold the "core has no dependencies"
+        # claim honest, and a test that ignores that breaks the claim rather
+        # than checking it.
+        pytest.importorskip("pyarrow")
     files, nxt = write_model(model, chains, tmp_path, "job", quiet=True)
     assert files, f"{model} reported no files"
     for f in files:
@@ -38,6 +44,8 @@ def test_every_model_writes_files_and_a_next_command(model, chains, tmp_path):
 
 @pytest.mark.parametrize("model", MODELS)
 def test_every_model_handles_a_two_chain_complex(model, chains, tmp_path):
+    if model == "chai":
+        pytest.importorskip("pyarrow")
     files, nxt = write_model(model, chains * 2, tmp_path, "job", quiet=True)
     assert files and nxt.strip()
 
@@ -102,3 +110,25 @@ def test_readme_signature_table_matches_the_adapters():
         actually_required = sig.parameters["out_dir"].default is inspect.Parameter.empty
         assert documented_required == actually_required, f"{name}: out_dir"
         assert (row.group(2).strip() == "yes") == ("name" in sig.parameters), f"{name}: name"
+
+
+def test_the_package_reports_the_version_it_was_built_as():
+    """0.2.1 shipped reporting itself as 0.2.0.
+
+    There were two hand-maintained version strings, in pyproject.toml and in
+    __init__.py, with nothing tying them together, so bumping one and not the
+    other published a package whose own `version` command lied. pyproject now
+    reads the module attribute, and this checks the two cannot drift again.
+    """
+    import re
+    from pathlib import Path
+
+    import scigantic_msa
+
+    pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+    # The version must NOT be written out a second time here.
+    assert not re.search(r"^version\s*=\s*[\"']", pyproject, re.M), (
+        "pyproject declares its own version again; it should stay dynamic"
+    )
+    assert 'version = {attr = "scigantic_msa.__version__"}' in pyproject
+    assert re.fullmatch(r"\d+\.\d+\.\d+", scigantic_msa.__version__), scigantic_msa.__version__

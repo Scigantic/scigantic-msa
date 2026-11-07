@@ -113,8 +113,17 @@ def test_convert_complex_and_checks(tmp_path, capsys):
 
 
 def test_version(capsys):
+    """Against __version__, not a literal.
+
+    This asserted "scigantic-msa 0.2.0" verbatim, so it had to be edited on
+    every release and could not notice the thing worth noticing: 0.2.1 shipped
+    reporting itself as 0.2.0, because pyproject.toml and __init__.py each
+    carried a version and only one was bumped.
+    """
+    import scigantic_msa
+
     assert main(["version"]) == 0
-    assert capsys.readouterr().out.startswith("scigantic-msa 0.2.0")
+    assert capsys.readouterr().out.startswith(f"scigantic-msa {scigantic_msa.__version__}")
 
 
 def test_removed_commands_are_gone(capsys):
