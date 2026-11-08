@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.2.6
+
+Changes you may notice:
+
+- AlphaFold 3: every paired row now sits at the same row index in every
+  chain that has it. Before, a chain without the first pairs' species and
+  with too few rows of its own put its later paired rows right after the
+  query, against other chains' rows of other species, while the notice
+  said they were paired. Where a chain has no row of its own left to stand
+  in, it gets a gap row, as Boltz does; the pairs are put in the order that
+  needs the fewest, and the notice says how many each chain got.
+- AlphaFold 3: rows that differ only in insertions are kept. AlphaFold 3
+  reads a user MSA without removing repeats, so they are not repeats to it.
+- Every MSA file is named, or put in a folder named, for its content. A
+  second alignment of the same sequence in one `--out` (`convert` with
+  another file and another `--name`, or `run` with `--host` after the
+  public server) no longer rewrites the first job's MSA for Boltz, Chai-1,
+  OpenFold3 and Protenix. Identical files are still shared. New paths:
+  Boltz `<sha256>.<hash>.a3m` and `.csv`, Chai-1
+  `msas/unpaired-<hash>/` for a job without pairing (as `paired-<hash>/`
+  before), OpenFold3 `main/<sha256>/<hash>/`, Protenix
+  `<sha256>/<hash>/`, AlphaFold 3 `inline=False`
+  `<sha256>.<hash>.unpaired.a3m` and `.paired.a3m`. The printed commands
+  and returned paths point there.
+- Boltz gets at most 8191 pair keys, the most it pairs besides the query.
+  Before, the rows of a pair past that were dropped by Boltz; now they are
+  unpaired rows.
+
+Fixes:
+
+- `https://api.colabfold.com//.` and other paths with repeated slashes
+  that the server reads as `/` are the public server, with its warning, cap
+  and cache.
+- The pairing notice counts chains, not distinct sequences, and names them
+  in order: A, B, A, C reads "across 4 chains", not "across 3 chains", and
+  "chains A, B, C, D", not "chains A, C, B, D".
+
 ## 0.2.5
 
 Changes you may notice:
