@@ -42,9 +42,12 @@ class NvidiaClient:
         sleep: Optional[Callable[[float], None]] = None,
         status_url: str = STATUS_URL,
     ):
+        what = "the NVIDIA server URL" if url else "SCIGANTIC_MSA_NVIDIA_URL"
         self.url = url or os.environ.get("SCIGANTIC_MSA_NVIDIA_URL") or DEFAULT_URL
-        http.refuse_credentials(self.url, "the NVIDIA server URL")
-        http.require_ascii(self.url, "the NVIDIA server URL")
+        http.refuse_credentials(self.url, what)
+        http.require_ascii(self.url, what)
+        http.refuse_credentials(status_url, "the NVIDIA status URL")
+        http.require_ascii(status_url, "the NVIDIA status URL")
         self.api_key = api_key or os.environ.get("NVIDIA_API_KEY")
         self.databases = databases or ["all"]
         self.e_value = e_value

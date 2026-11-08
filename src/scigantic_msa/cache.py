@@ -13,8 +13,10 @@ On Windows the default is ``%LOCALAPPDATA%\\scigantic-msa\\cache``.
 ``scigantic-msa cache`` prints the directory in use.
 
 Files are written 0600 and the directories under the cache directory are
-0700 (tightened when an older, looser one is written to), so other users
-of a shared machine cannot list which sequences were searched.
+0700, so other users of a shared machine cannot list which sequences were
+searched. An older, looser ``alignments`` folder is tightened the first
+time the cache is used, even only to read it, and the folders under it
+when an entry is written.
 
 Delete the directory to forget every alignment. Nothing in it is sent
 anywhere.
@@ -35,14 +37,23 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = ["cache_dir", "atomic_write", "private_dirs", "FileLock", "AlignmentCache"]
 
 
+def _absolute_env(name: str) -> Optional[str]:
+    """The value of ``name`` when it is an absolute path, else None. The XDG
+    Base Directory spec says a relative path there is invalid and must be
+    ignored; used, it would put the cache under whatever folder a run starts
+    in (a literal ``~/xdg`` would make a folder named ``~`` there)."""
+    value = os.environ.get(name)
+    return value if value and os.path.isabs(value) else None
+
+
 def cache_dir() -> Path:
     env = os.environ.get("SCIGANTIC_MSA_CACHE")
     if env:
         return Path(env).expanduser()
     if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        base = _absolute_env("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
         return Path(base) / "scigantic-msa" / "cache"
-    xdg = os.environ.get("XDG_CACHE_HOME")
+    xdg = _absolute_env("XDG_CACHE_HOME")
     return (Path(xdg) if xdg else Path.home() / ".cache") / "scigantic-msa"
 
 
@@ -217,6 +228,21 @@ class AlignmentCache:
 
     def __init__(self, root: Optional[Path] = None):
         self.root = (root or cache_dir()) / "alignments"
+        self._tightened = False
+
+    def _tighten(self) -> None:
+        """Make ``alignments/`` 0700 once per cache object, on first use,
+        whether to read or write. A cache made by 0.2.7 or older has it
+        0755, and a run that only reads would otherwise leave it so; with it
+        0700 nobody else can list or enter the folders under it."""
+        if self._tightened:
+            return
+        self._tightened = True
+        try:
+            if os.stat(self.root).st_mode & 0o077:
+                _owner_only(self.root)
+        except OSError:
+            pass  # not there yet, or not ours
 
     def _dir(self, sha: str) -> Path:
         return self.root / sha[:2] / sha
@@ -231,6 +257,7 @@ class AlignmentCache:
         return FileLock(self.path(sha, backend, dbkey), timeout=timeout, make_dir=lambda: self._make_dir(sha))
 
     def entries(self, sha: str) -> List[Path]:
+        self._tighten()
         d = self._dir(sha)
         if not d.is_dir():
             return []
@@ -241,6 +268,7 @@ class AlignmentCache:
         from .a3m import A3MError
         from .alignment import Alignment
 
+        self._tighten()
         if backend is not None and dbkey is not None:
             candidates = [self.path(sha, backend, dbkey)]
         else:

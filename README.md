@@ -40,17 +40,22 @@ Your sequence may be unpublished, so read this before you run a search.
   contacts a Scigantic server.
 - The sequence is never written to a log. Results are kept in a local cache
   so the same sequence is not submitted twice: `SCIGANTIC_MSA_CACHE` if set,
-  else `$XDG_CACHE_HOME/scigantic-msa` if `XDG_CACHE_HOME` is set, else
-  `~/.cache/scigantic-msa` (on Windows, `%LOCALAPPDATA%\scigantic-msa\cache`).
-  `scigantic-msa cache` prints the one in use. Delete it to forget them, or
-  pass `--no-cache`. Only you can read its files or list its folders,
-  which are named by a hash of the sequence. If the cache
+  else `$XDG_CACHE_HOME/scigantic-msa` if `XDG_CACHE_HOME` is an absolute
+  path (a relative one is ignored, as the XDG spec says), else
+  `~/.cache/scigantic-msa` (on Windows, `%LOCALAPPDATA%\scigantic-msa\cache`,
+  when `LOCALAPPDATA` is absolute). `scigantic-msa cache` prints the one in
+  use. Delete it to forget them, or pass `--no-cache`. Only you can read its
+  files or list its folders, which are named by a hash of the sequence; a
+  cache made by 0.2.7 or older is made so the first time it is used, even
+  only to read it. If the cache
   directory cannot be written (read-only home, say), the tool warns once
   and runs without it.
 - `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks,
-  including a client used directly: every request to a server checks it.
-  Any value but `0`, `false`, `no` or `off` counts. Results already in the
-  cache are still used, since they send nothing.
+  including a client used directly: every request to a server checks it,
+  and so does every retry. Any value but `0`, `false`, `no` or `off`
+  counts, including one of only spaces; an empty value
+  (`SCIGANTIC_MSA_NO_REMOTE=`) is the same as not setting it. Results
+  already in the cache are still used, since they send nothing.
 
 The public ColabFold server is a shared resource with a rate limit of about
 one new job per minute per IP address. This client backs off, honours
@@ -105,7 +110,7 @@ single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
 
 `--host` takes an `http://` or `https://` URL in ASCII with no spaces,
-user name or password, query or fragment, and so do
+backslash, user name or password, query or fragment, and so do
 `SCIGANTIC_MSA_COLABFOLD_URL` and `SCIGANTIC_MSA_NVIDIA_URL`. Any spelling of the public server's URL
 (`HTTPS://API.colabfold.com:443/` or `https://api.colabfold.com/./`, say)
 is the public server, reached over https. `--server nvidia` uses NVIDIA's hosted MSA Search and needs
@@ -309,11 +314,11 @@ files.
 
 | variable | meaning |
 | --- | --- |
-| `SCIGANTIC_MSA_CACHE` | cache directory (default `$XDG_CACHE_HOME/scigantic-msa`, else `~/.cache/scigantic-msa`; `scigantic-msa cache` prints it) |
-| `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server (any value but `0`, `false`, `no`, `off`) |
+| `SCIGANTIC_MSA_CACHE` | cache directory (default `$XDG_CACHE_HOME/scigantic-msa` when that is absolute, else `~/.cache/scigantic-msa`; `scigantic-msa cache` prints it) |
+| `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server (any value but empty, `0`, `false`, `no`, `off`) |
 | `SCIGANTIC_MSA_COLABFOLD_URL` | another ColabFold MMseqs2 server |
 | `SCIGANTIC_MSA_NVIDIA_URL` | another NVIDIA MSA Search endpoint |
-| `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to the server, such as an email address |
+| `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to the server, such as an email address (one line, Latin-1; `run` stops before sending otherwise) |
 | `NVIDIA_API_KEY` | key for `--server nvidia` |
 
 ## Development

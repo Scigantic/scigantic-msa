@@ -143,15 +143,24 @@ class ColabFoldClient:
         clock: Optional[Callable[[], float]] = None,
         on_status: Optional[Callable[[str, str], None]] = None,
     ):
-        host = (host or os.environ.get("SCIGANTIC_MSA_COLABFOLD_URL") or DEFAULT_HOST).strip().rstrip("/")
-        http.refuse_credentials(host, "the ColabFold server URL")
+        what = "the ColabFold server URL" if host else "SCIGANTIC_MSA_COLABFOLD_URL"
+        host = host or os.environ.get("SCIGANTIC_MSA_COLABFOLD_URL") or DEFAULT_HOST
+        # On the URL as given, before anything else can repeat it.
+        http.refuse_credentials(host, what)
+        host = host.strip().rstrip("/")
         http.require_ascii(host, "the ColabFold server URL")
         # One spelling for the public server, so it gets its warning and
         # cache entries, and over https: http would send the sequence in clear.
         self.host = DEFAULT_HOST if public_host(host) else host
         self.mode = mode
-        contact = contact or os.environ.get("SCIGANTIC_MSA_CONTACT")
+        if contact:
+            http.check_header_value(contact, "the contact")
+        else:
+            contact = os.environ.get("SCIGANTIC_MSA_CONTACT")
+            if contact:
+                http.check_header_value(contact, "SCIGANTIC_MSA_CONTACT")
         self.user_agent = http.USER_AGENT + (f" {contact}" if contact else "")
+        http.check_header_value(self.user_agent, "the User-Agent")
         self.deadline = deadline
         self.poll_min = poll_min
         self.poll_jitter = poll_jitter

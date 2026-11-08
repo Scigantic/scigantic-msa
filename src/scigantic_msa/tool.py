@@ -248,9 +248,11 @@ _HOST_ENV = {"colabfold": "SCIGANTIC_MSA_COLABFOLD_URL", "nvidia": "SCIGANTIC_MS
 def check_host(host: str, what: str = "--host") -> None:
     """Refuse a server URL that is not http(s)://host. A missing scheme
     ("localhost:8080") gets an example of the right form. ``what`` names
-    where the URL came from in the error."""
-    host = host.strip()
+    where the URL came from in the error. A URL with a user name or
+    password is refused first, on the string as given, so no error repeats
+    it."""
     http.refuse_credentials(host, what)
+    host = host.strip()
     http.require_ascii(host, what)
     parts = urllib.parse.urlsplit(host)
     if parts.scheme.lower() in ("http", "https"):

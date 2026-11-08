@@ -16,6 +16,7 @@ import random
 import re
 import socket
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,9 +55,12 @@ NO_REMOTE_MESSAGE = "SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to a
 def remote_disabled() -> bool:
     """SCIGANTIC_MSA_NO_REMOTE turns every remote backend off, whatever the
     code or config asks for. Any value but 0, false, no or off counts, so a
-    value we did not think of fails safe."""
-    value = os.environ.get("SCIGANTIC_MSA_NO_REMOTE", "").strip().lower()
-    return value not in ("", "0", "false", "no", "off")
+    value we did not think of fails safe; that includes one of only spaces.
+    An empty value is the shell's way to unset a variable, so it is off."""
+    value = os.environ.get("SCIGANTIC_MSA_NO_REMOTE", "")
+    if value == "":
+        return False
+    return value.strip().lower() not in ("0", "false", "no", "off")
 
 
 def refuse_if_disabled() -> None:
@@ -143,15 +147,21 @@ def request(
 
     Non-retryable HTTP errors are returned (``raise_for_status=False``) or
     raised as HTTPError (404 as NotFound). Raises RemoteNotAllowed, and
-    sends nothing, while SCIGANTIC_MSA_NO_REMOTE is set.
+    sends nothing, while SCIGANTIC_MSA_NO_REMOTE is set. The switch is
+    checked again before every retry, so setting it during a backoff stops
+    the request from being sent again. A URL with a user name or password is
+    refused before any name lookup.
     """
-    refuse_if_disabled()
+    refuse_credentials(url, "the server URL")
     hdrs = {"User-Agent": USER_AGENT}
     if headers:
         hdrs.update(headers)
+    for k, v in hdrs.items():
+        check_header_value(v, k)
     last: Optional[BaseException] = None
     last_resp: Optional[Response] = None
     for attempt in range(retry.attempts):
+        refuse_if_disabled()
         req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
         delay: Optional[float] = None
         try:
@@ -203,8 +213,12 @@ def request(
 
 
 def _short(url: str) -> str:
+    """The URL for a message: scheme, host and path, never a user name or
+    password, a query or a fragment."""
     p = urllib.parse.urlsplit(url)
-    return f"{p.scheme}://{p.netloc}{p.path}" if p.scheme else url
+    if not p.scheme:
+        return "the server" if "@" in url else url
+    return f"{p.scheme}://{p.netloc.rpartition('@')[2]}{p.path}"
 
 
 def split_url(url: str) -> Tuple[str, str]:
@@ -222,14 +236,44 @@ def ascii_host(host: str) -> Optional[str]:
 
 
 def refuse_credentials(url: str, what: str) -> None:
-    """Refuse a URL with a user name or password in it (``user:pass@host``).
-    The tool never sends credentials that way, and urllib would read them
-    as part of the host name. The error does not repeat the URL, so the
-    password is not printed."""
-    rest = url.strip().split("://", 1)[-1]
-    if "@" in re.split(r"[/?#\\]", rest, maxsplit=1)[0]:
+    """Refuse a URL with a user name or password in it (``user:pass@host``),
+    or with a backslash, which no http URL needs. Every entry point calls
+    this first, on the URL as given, before anything else can repeat it.
+
+    It looks at the host part the way urllib.parse reads it, which is how
+    the URL would be connected to, and also at the text after the scheme
+    with any slashes removed, so that ``//user:pass@host``,
+    ``http:/user:pass@host`` and the like are caught too. The error does not
+    repeat the URL, so the password is not printed."""
+    if "\\" in url:
+        raise ValueError(f"{what} has a backslash in it; an http URL uses '/'. "
+                         "Write it with forward slashes only")
+    # NFKC, as urllib.parse checks a host with it: a fullwidth at sign is '@'.
+    s = unicodedata.normalize("NFKC", url.strip())
+    try:
+        netloc = urllib.parse.urlsplit(s).netloc
+    except ValueError:
+        # urllib's own error repeats the host part, which may hold a password.
+        raise ValueError(f"{what} is not a valid URL; give the server URL with http:// or https:// and a host name") from None
+    rest = re.sub(r"^[A-Za-z][A-Za-z0-9+.-]*:", "", s).lstrip("/")
+    if "@" in netloc or "@" in re.split(r"[/?#]", rest, maxsplit=1)[0]:
         raise ValueError(f"{what} has a user name or password in it (the part before '@'); "
                          "remove it. scigantic-msa does not send credentials in a URL")
+
+
+def check_header_value(value: str, what: str) -> None:
+    """Refuse a header value urllib cannot send: a line break or other
+    control character, or a character outside Latin-1. Called before
+    anything says it is sending, so the error is this one and not a codec
+    error after the announcement. The error does not repeat the value."""
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError(f"{what} has a line break or another control character in it; "
+                         "it goes in an HTTP header, so give it on one line")
+    try:
+        value.encode("latin-1")
+    except UnicodeEncodeError:
+        raise ValueError(f"{what} has characters an HTTP header cannot carry (only Latin-1 is allowed); "
+                         "write it in ASCII, such as an email address") from None
 
 
 def require_ascii(url: str, what: str) -> None:
