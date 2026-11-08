@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from scigantic_msa import write_model
-from scigantic_msa.a3m import Row, parse_a3m
+from scigantic_msa.a3m import Row
 from scigantic_msa.adapters import AlphaFold3, Boltz, _chain_names, _distinct
 from scigantic_msa.alignment import Alignment
 from scigantic_msa.cli import main
