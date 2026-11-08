@@ -144,6 +144,7 @@ class ColabFoldClient:
         on_status: Optional[Callable[[str, str], None]] = None,
     ):
         host = (host or os.environ.get("SCIGANTIC_MSA_COLABFOLD_URL") or DEFAULT_HOST).strip().rstrip("/")
+        http.refuse_credentials(host, "the ColabFold server URL")
         http.require_ascii(host, "the ColabFold server URL")
         # One spelling for the public server, so it gets its warning and
         # cache entries, and over https: http would send the sequence in clear.
@@ -172,6 +173,8 @@ class ColabFoldClient:
 
     # ------------------------------------------------------------ low level
     def _call(self, method: str, path: str, data: Optional[Dict[str, str]] = None) -> http.Response:
+        # SCIGANTIC_MSA_NO_REMOTE wins over a client used directly, too.
+        http.refuse_if_disabled()
         body = urllib.parse.urlencode(data).encode() if data is not None else None
         headers = {"User-Agent": self.user_agent, "Accept": "application/json"}
         if body is not None:
@@ -237,7 +240,13 @@ class ColabFoldClient:
 
         The job id is computed locally, so the first call is a status check:
         a job that is already complete is downloaded without submitting.
+
+        Calling this sends the sequence: constructing the client and calling
+        ``search`` is the explicit choice that ``remote=True`` is for
+        ``MSA().get()``. It raises RemoteNotAllowed, and sends nothing, while
+        SCIGANTIC_MSA_NO_REMOTE is set.
         """
+        http.refuse_if_disabled()
         seq = canonical_sequence(seq)
         q = query_text(seq)
         tid = ticket_id(q, self.mode)

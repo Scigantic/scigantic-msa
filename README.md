@@ -13,6 +13,7 @@ no account and no login, and nothing is stored on our side.
 ```
 pip install scigantic-msa            # or: uv tool install scigantic-msa
 pip install 'scigantic-msa[chai]'    # adds pyarrow, needed for Chai-1 files
+uv tool install 'scigantic-msa[chai]'  # the same, for the uv tool
 ```
 
 Python 3.10 or newer. The core has no dependencies. If your shell cannot
@@ -29,18 +30,25 @@ Your sequence may be unpublished, so read this before you run a search.
   knows the sequence can download the result. Treat a submission there as
   publishing the sequence.
 - The Python API refuses to send anything unless you pass `remote=True`.
-  The command line says which server will receive the sequence and asks
-  once; `--yes` skips the question for scripts. Without a terminal and
+  Constructing a client yourself (`ColabFoldClient(...).search(seq)`, or
+  `NvidiaClient`) is that same choice made in code, so it sends without
+  `remote=True`; it does not use the cache or say where it sends. The
+  command line says which server will receive the sequence and asks once; `--yes` skips the question for scripts. Without a terminal and
   without `--yes`, it stops and sends nothing.
 - `convert` and `MSA().from_a3m()` make no network connection at all.
 - The only network traffic is to the server you chose. The tool never
   contacts a Scigantic server.
 - The sequence is never written to a log. Results are kept in a local cache
-  (`~/.cache/scigantic-msa`, or `SCIGANTIC_MSA_CACHE`) so the same sequence
-  is not submitted twice; delete the directory to forget them, or pass
-  `--no-cache`. If the cache directory cannot be written (read-only home,
-  say), the tool warns once and runs without it.
-- `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks.
+  so the same sequence is not submitted twice: `SCIGANTIC_MSA_CACHE` if set,
+  else `$XDG_CACHE_HOME/scigantic-msa` if `XDG_CACHE_HOME` is set, else
+  `~/.cache/scigantic-msa` (on Windows, `%LOCALAPPDATA%\scigantic-msa\cache`).
+  `scigantic-msa cache` prints the one in use. Delete it to forget them, or
+  pass `--no-cache`. Only you can read its files or list its folders,
+  which are named by a hash of the sequence. If the cache
+  directory cannot be written (read-only home, say), the tool warns once
+  and runs without it.
+- `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks,
+  including a client used directly: every request to a server checks it.
   Any value but `0`, `false`, `no` or `off` counts. Results already in the
   cache are still used, since they send nothing.
 
@@ -58,6 +66,7 @@ scigantic-msa run SEQ_OR_FASTA --model boltz --out job/
 scigantic-msa run chains.fasta --complex --model af3 --out job/ --yes
 scigantic-msa run many.fasta --batch --model boltz --out jobs/
 scigantic-msa convert my_alignment.a3m --model protenix --out job/
+scigantic-msa cache        # prints the cache directory
 scigantic-msa --version
 ```
 
@@ -72,7 +81,9 @@ saves it, or gzipped), `-` for stdin, or the sequence itself. So that a
 mistyped file name is never sent as a protein, a typed argument is refused when it names a directory, when a file with that name
 plus an extension exists (`query` next to `query.fasta`), or when it is
 shorter than 10 residues. To send a short peptide on purpose, start it
-with `=`, as in `=MKVLAAG`. A sequence that is only `A`, `C`, `G`, `T`,
+with `=` and quote it, as in `'=MKVLAAG'` (zsh reads an unquoted word that
+starts with `=` as a command name; the quoted form works in bash, zsh and
+fish). A sequence that is only `A`, `C`, `G`, `T`,
 `U` and `N` gets a warning that it looks like DNA or RNA.
 
 `:` inside a sequence separates the chains of one complex. A FASTA file
@@ -94,8 +105,8 @@ single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
 
 `--host` takes an `http://` or `https://` URL in ASCII with no spaces,
-query or fragment, and so do `SCIGANTIC_MSA_COLABFOLD_URL` and
-`SCIGANTIC_MSA_NVIDIA_URL`. Any spelling of the public server's URL
+user name or password, query or fragment, and so do
+`SCIGANTIC_MSA_COLABFOLD_URL` and `SCIGANTIC_MSA_NVIDIA_URL`. Any spelling of the public server's URL
 (`HTTPS://API.colabfold.com:443/` or `https://api.colabfold.com/./`, say)
 is the public server, reached over https. `--server nvidia` uses NVIDIA's hosted MSA Search and needs
 `NVIDIA_API_KEY`; without it, `run` stops before asking to send.
@@ -146,6 +157,9 @@ from scigantic_msa.adapters import AlphaFold3
 result = MSA().get(sequence, remote=True)
 json.dump(AlphaFold3.prepare(result, name="job"), open("job.json", "w"))
 ```
+
+`AlphaFold3.prepare(result, name="job", out_dir="af3/", inline=False)`
+writes the MSAs as files next to `af3/job.json` instead of inside it.
 
 Boltz:
 
@@ -281,7 +295,11 @@ The alignments come from the server you chose, under its terms:
 - NVIDIA MSA Search (experimental here), under NVIDIA's API trial terms.
 
 Every adapter that writes files also writes `scigantic-msa-attribution.json`
-next to them, with the server, mode, date and the terms to credit. When
+next to them, with the server, mode, date and the terms to credit. For each
+chain it also holds its length, depth, `seq_sha256` (the files next to it
+are named with it too), whether the alignment came from the server, the
+cache or a file (by name, without its folder), and the names of the files
+written. It holds no local path and no server job id. When
 several jobs, models or runs write into one folder, the file keeps one
 entry per write under `outputs`, and `sources` lists every distinct credit.
 A write replaces an older entry only when it rewrote all of that entry's
@@ -291,7 +309,7 @@ files.
 
 | variable | meaning |
 | --- | --- |
-| `SCIGANTIC_MSA_CACHE` | cache directory (default `~/.cache/scigantic-msa`) |
+| `SCIGANTIC_MSA_CACHE` | cache directory (default `$XDG_CACHE_HOME/scigantic-msa`, else `~/.cache/scigantic-msa`; `scigantic-msa cache` prints it) |
 | `SCIGANTIC_MSA_NO_REMOTE=1` | never send a sequence to any server (any value but `0`, `false`, `no`, `off`) |
 | `SCIGANTIC_MSA_COLABFOLD_URL` | another ColabFold MMseqs2 server |
 | `SCIGANTIC_MSA_NVIDIA_URL` | another NVIDIA MSA Search endpoint |

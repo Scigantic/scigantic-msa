@@ -4,12 +4,16 @@ server you chose.
 - Retries 429, 5xx, timeouts and dropped connections with exponential
   backoff, and honours Retry-After (seconds or an HTTP date) up to a cap.
 - Authorization headers are dropped when a redirect leaves the original host.
+- Nothing is sent while SCIGANTIC_MSA_NO_REMOTE is set: every request to a
+  search server goes through ``request`` here, which refuses first.
 """
 from __future__ import annotations
 
 import email.utils
 import http.client
+import os
 import random
+import re
 import socket
 import time
 import urllib.error
@@ -38,6 +42,28 @@ class HTTPError(Exception):
 
 class NotFound(HTTPError):
     pass
+
+
+class RemoteNotAllowed(PermissionError):
+    """A search was asked for without remote=True, or SCIGANTIC_MSA_NO_REMOTE is set."""
+
+
+NO_REMOTE_MESSAGE = "SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to any server"
+
+
+def remote_disabled() -> bool:
+    """SCIGANTIC_MSA_NO_REMOTE turns every remote backend off, whatever the
+    code or config asks for. Any value but 0, false, no or off counts, so a
+    value we did not think of fails safe."""
+    value = os.environ.get("SCIGANTIC_MSA_NO_REMOTE", "").strip().lower()
+    return value not in ("", "0", "false", "no", "off")
+
+
+def refuse_if_disabled() -> None:
+    """Raise RemoteNotAllowed when SCIGANTIC_MSA_NO_REMOTE is set. Every
+    client calls this before each request, and ``request`` calls it again."""
+    if remote_disabled():
+        raise RemoteNotAllowed(NO_REMOTE_MESSAGE)
 
 
 @dataclass
@@ -116,8 +142,10 @@ def request(
     """Send one request with retries. Returns the final response.
 
     Non-retryable HTTP errors are returned (``raise_for_status=False``) or
-    raised as HTTPError (404 as NotFound).
+    raised as HTTPError (404 as NotFound). Raises RemoteNotAllowed, and
+    sends nothing, while SCIGANTIC_MSA_NO_REMOTE is set.
     """
+    refuse_if_disabled()
     hdrs = {"User-Agent": USER_AGENT}
     if headers:
         hdrs.update(headers)
@@ -191,6 +219,17 @@ def ascii_host(host: str) -> Optional[str]:
         return host.encode("idna").decode("ascii").lower()
     except UnicodeError:
         return None
+
+
+def refuse_credentials(url: str, what: str) -> None:
+    """Refuse a URL with a user name or password in it (``user:pass@host``).
+    The tool never sends credentials that way, and urllib would read them
+    as part of the host name. The error does not repeat the URL, so the
+    password is not printed."""
+    rest = url.strip().split("://", 1)[-1]
+    if "@" in re.split(r"[/?#\\]", rest, maxsplit=1)[0]:
+        raise ValueError(f"{what} has a user name or password in it (the part before '@'); "
+                         "remove it. scigantic-msa does not send credentials in a URL")
 
 
 def require_ascii(url: str, what: str) -> None:

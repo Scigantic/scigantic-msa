@@ -162,10 +162,18 @@ class AlphaFold3:
 
     @staticmethod
     def prepare(results: Results, sequence: Any = None, *, name: Optional[str] = None,
-                input: Any = None, out_dir: Any = None, quiet: bool = False) -> dict:  # noqa: A002
+                input: Any = None, out_dir: Any = None, inline: bool = True,  # noqa: A002
+                quiet: bool = False) -> dict:
         """Return the AF3 input as a dict. With ``input`` (a dict or a path to
         an AF3 JSON), fill in the matching protein entries and keep the rest.
-        With ``out_dir``, also write ``<name>.json`` there."""
+        With ``out_dir``, also write ``<name>.json`` there.
+
+        ``inline=False`` (needs ``out_dir``) writes each chain's MSA to its
+        own file next to the JSON, ``<sha256>.<hash>.unpaired.a3m`` (and
+        ``.paired.a3m``), and points ``unpairedMsaPath``/``pairedMsaPath``
+        at it, instead of putting the MSA text in the JSON."""
+        if not inline and out_dir is None:
+            raise PrepareError("AlphaFold3.prepare(inline=False) needs out_dir, where the MSA files go")
         chains = _chains(results, sequence)
         path = None
         if out_dir is not None:
@@ -187,12 +195,20 @@ class AlphaFold3:
         # AlphaFold 3 keeps dots in the output directory it makes from the
         # name, so a name of ".." would write outside --output_dir.
         doc = writers.write_af3_json(chains, path, input=input, name=_safe_name(name) if name else None,
-                                     pairing=pr)
+                                     inline=inline, pairing=pr)
         for entry in doc.get("sequences", []):
             prot = entry.get("protein")
-            if isinstance(prot, dict) and isinstance(prot.get("unpairedMsa"), str) and prot["unpairedMsa"]:
+            if not isinstance(prot, dict):
+                continue
+            text, what = prot.get("unpairedMsa"), f"protein {prot.get('id')} unpairedMsa"
+            if isinstance(prot.get("unpairedMsaPath"), str) and path is not None:
+                f = path.parent / prot["unpairedMsaPath"]
+                if not f.is_file() or f.stat().st_size == 0:
+                    raise PrepareError(f"AlphaFold 3: {f.name} is missing or empty")
+                text, what = f.read_text(), f.name
+            if isinstance(text, str) and text:
                 try:
-                    parse_a3m(prot["unpairedMsa"], prot["sequence"], what=f"protein {prot.get('id')} unpairedMsa")
+                    parse_a3m(text, prot["sequence"], what=what)
                 except A3MError as e:
                     raise PrepareError(str(e)) from None
         return doc

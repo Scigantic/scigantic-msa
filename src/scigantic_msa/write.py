@@ -21,6 +21,7 @@ from typing import List, Sequence, Tuple
 
 from .adapters import AlphaFold3, Boltz, Chai, ColabFold, OpenFold3, PrepareError, Protenix, _protenix_letters, _safe_name
 from .alignment import Alignment
+from .writers import PYARROW_HINT
 
 #: The model names ``write_model`` accepts, same strings as ``--model``.
 MODELS = ("af3", "boltz", "chai", "colabfold", "openfold3", "protenix")
@@ -65,7 +66,7 @@ def check_model(model: str, sequences: Sequence[str]) -> None:
             import pyarrow  # noqa: F401
             import pyarrow.parquet  # noqa: F401
         except ImportError:
-            raise ImportError("writing Chai-1 files needs pyarrow: pip install 'scigantic-msa[chai]'") from None
+            raise ImportError(PYARROW_HINT) from None
     if model == "protenix":
         seen = set()
         for i, q in enumerate(sequences, 1):

@@ -2,6 +2,7 @@
 
     scigantic-msa run SEQ_OR_FASTA --model boltz --out DIR [--server colabfold|nvidia] [--yes]
     scigantic-msa convert ALIGNMENT.a3m [MORE.a3m ...] --model af3 --out DIR [--uniprot U.sto ...]
+    scigantic-msa cache     (prints the cache directory)
     scigantic-msa version   (or --version)
 
 ``run`` sends the sequence to the search server and asks once before it
@@ -23,6 +24,7 @@ from . import __version__
 from .a3m import A3MError
 from .adapters import PrepareError
 from .alignment import Alignment
+from .cache import cache_dir
 from .remote import BACKENDS, remote_disabled
 from .remote.colabfold import JobFailed, RemoteError
 from .seqkey import InvalidSequence, canonical_sequence
@@ -148,6 +150,13 @@ def read_chains(arg: str) -> Tuple[str, List[str]]:
     return name, [c for _, cs in recs for c in cs]
 
 
+def _eq_hint(arg: str) -> str:
+    """The argument with '=' in front, quoted: zsh replaces an unquoted word
+    that starts with '=' by the path of a command of that name, and the
+    quoted form reads the same in bash, zsh and fish."""
+    return "'=" + arg.replace("'", "'\\''") + "'"
+
+
 def _check_near_file(arg: str) -> None:
     """Refuse a typed argument when a file of that name plus an extension
     exists ('query' next to 'query.fasta'). Called only when no file or
@@ -159,7 +168,7 @@ def _check_near_file(arg: str) -> None:
             near = []
         if near:
             raise InputError(f"there is no file named {arg!r}. Did you mean {near[0]}? "
-                             f"To send {arg!r} as a sequence, write it as ={arg}.")
+                             f"To send {arg!r} as a sequence, write it as {_eq_hint(arg)}.")
 
 
 def _check_typed(arg: str, chains: List[str]) -> None:
@@ -170,9 +179,9 @@ def _check_typed(arg: str, chains: List[str]) -> None:
         if len(arg) > 40:
             # Too long to be a file name: do not echo the sequence back.
             raise InputError(f"a chain of the sequence has only {short} residues. To send a short chain "
-                             "on purpose, put '=' in front of the whole argument.")
+                             "on purpose, put '=' in front of the whole argument and quote it, as in '=SEQ'.")
         raise InputError(f"{arg!r} is not a file, and as a sequence it has only {short} residues. "
-                         f"To send a short sequence on purpose, write it as ={arg}.")
+                         f"To send a short sequence on purpose, write it as {_eq_hint(arg)}.")
 
 
 def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tuple[str, List[str]]]:
@@ -436,6 +445,13 @@ def cmd_convert(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cache(a: argparse.Namespace) -> int:
+    """Print the cache directory, so it can be found and deleted. It may
+    not exist yet."""
+    print(cache_dir())
+    return 0
+
+
 def cmd_version(a: argparse.Namespace) -> int:
     print(f"scigantic-msa {__version__}")
     return 0
@@ -449,8 +465,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="search a server for the MSA, then write the model's input")
-    r.add_argument("sequence", help="a FASTA file, - for stdin, or a sequence (start it with '=' if it is "
-                                    "shorter than 10 residues); ':' separates chains of a complex")
+    r.add_argument("sequence", help="a FASTA file, - for stdin, or a sequence (start it with '=' and quote it, "
+                                    "as in '=MKVLAAG', if it is shorter than 10 residues); ':' separates chains of a complex")
     r.add_argument("--model", "-m", choices=MODELS, required=True)
     r.add_argument("--out", "-o", required=True, help="output directory")
     r.add_argument("--server", choices=BACKENDS, default="colabfold", help="where the sequence is sent (default colabfold)")
@@ -480,6 +496,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--quiet", "-q", action="store_true")
     c.set_defaults(func=cmd_convert)
 
+    sub.add_parser("cache", help="print the local cache directory (delete it to forget every result)"
+                   ).set_defaults(func=cmd_cache)
     sub.add_parser("version", help="print the version").set_defaults(func=cmd_version)
     return p
 

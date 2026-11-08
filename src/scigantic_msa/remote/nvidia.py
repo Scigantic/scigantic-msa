@@ -43,6 +43,7 @@ class NvidiaClient:
         status_url: str = STATUS_URL,
     ):
         self.url = url or os.environ.get("SCIGANTIC_MSA_NVIDIA_URL") or DEFAULT_URL
+        http.refuse_credentials(self.url, "the NVIDIA server URL")
         http.require_ascii(self.url, "the NVIDIA server URL")
         self.api_key = api_key or os.environ.get("NVIDIA_API_KEY")
         self.databases = databases or ["all"]
@@ -76,6 +77,8 @@ class NvidiaClient:
         }
 
     def _request(self, method: str, url: str, data: Optional[bytes] = None) -> http.Response:
+        # SCIGANTIC_MSA_NO_REMOTE wins over a client used directly, too.
+        http.refuse_if_disabled()
         try:
             return http.request(method, url, data=data, headers=self._headers(), timeout=self.timeout,
                                 raise_for_status=False)
@@ -84,6 +87,11 @@ class NvidiaClient:
             raise RemoteError(f"NVIDIA MSA search: {e}") from None
 
     def search(self, seq: str) -> RemoteResult:
+        """Send the sequence to NVIDIA and return its rows. Raises
+        RemoteNotAllowed, and sends nothing, while SCIGANTIC_MSA_NO_REMOTE is
+        set."""
+        http.refuse_if_disabled()
+        self.check_ready()
         seq = canonical_sequence(seq)
         body = json.dumps({
             "sequence": seq,

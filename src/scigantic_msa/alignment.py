@@ -128,6 +128,14 @@ class Alignment:
             "n_rows": len(self.rows),
             "n_uniprot": len(self.uniprot_rows) if self.uniprot_rows else 0,
         }
+        # Each row's database label where it is not what its header alone
+        # gives, so a result read back from the cache labels its rows (and so
+        # Chai-1's source_database) exactly as the fresh result did: a
+        # ColabFold environmental row is "env" even when its header is MGYP.
+        stored = self.rows + (self.uniprot_rows[1:] if self.uniprot_rows else [])
+        meta["dbs"] = {str(i): r.db for i, r in enumerate(stored) if i and r.db != classify_header(r.header)}
+        if self.templates is not None:
+            meta["templates"] = self.templates
         taxids = {str(i): r.taxid for i, r in enumerate(self.rows) if r.taxid}
         text = "#scigantic-msa " + json.dumps(meta, separators=(",", ":"), sort_keys=True) + "\n"
         text += format_a3m(self.rows)
@@ -186,18 +194,35 @@ class Alignment:
             split = len(rows) - (n_uni - 1)
             uniprot_rows = [rows[0]] + rows[split:]
             rows = rows[:split]
+        prov = dict(provenance or meta.get("provenance") or {})
+        dbs = meta.get("dbs")
+        if isinstance(dbs, dict):
+            stored = rows + (uniprot_rows[1:] if uniprot_rows else [])
+            for k, v in dbs.items():
+                i = int(k)
+                if 0 < i < len(stored) and isinstance(v, str):
+                    stored[i].db = v
+        elif prov.get("backend") == "colabfold":
+            # Written by 0.2.7 or earlier, without labels: a fresh ColabFold
+            # result labels every row of the environmental file "env" unless
+            # its header is UniRef, and uniref.a3m holds only UniRef rows.
+            for r in rows[1:]:
+                if not r.header.startswith("UniRef"):
+                    r.db = "env"
         for k, v in (meta.get("taxids") or {}).items():
             i = int(k)
             if 0 <= i < len(rows):
                 rows[i].taxid = v
         want = meta.get("seq_sha256")
+        templates = meta.get("templates")
         msa = cls(
             query=rows[0].seq,
             rows=rows,
             source=source,
-            provenance=dict(provenance or meta.get("provenance") or {}),
+            provenance=prov,
             attribution=list(meta.get("attribution") or []),
             uniprot_rows=uniprot_rows,
+            templates=templates if isinstance(templates, dict) else None,
         )
         if want and want != msa.seq_sha256:
             raise A3MError("stored alignment's metadata names a different sequence")

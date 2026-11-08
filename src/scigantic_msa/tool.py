@@ -19,9 +19,10 @@ import os
 import sys
 import urllib.parse
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, overload
 
 from . import http
+from .http import RemoteNotAllowed
 from .a3m import A3MError, parse_a3m, parse_stockholm
 from .alignment import _UNIPROT, Alignment
 from .cache import AlignmentCache, LockTimeout
@@ -40,8 +41,8 @@ SERVERS: Dict[str, str] = {
 }
 
 
-class RemoteNotAllowed(PermissionError):
-    """get() was called without remote=True, or SCIGANTIC_MSA_NO_REMOTE is set."""
+#: The cache warning is said once per process, not once per MSA object.
+_cache_warned = False
 
 
 class MSA:
@@ -123,13 +124,24 @@ class MSA:
             return
         where = self._cache.root.parent
         self._cache = None
+        global _cache_warned
+        if _cache_warned:
+            return
+        _cache_warned = True
         msg = (f"cannot use the cache at {where} ({e.strerror or type(e).__name__}); continuing without it. "
                "Pass --no-cache (cache=False in Python) to skip it.")
         log.info(msg)
         print(f"scigantic-msa: warning: {msg}", file=sys.stderr, flush=True)
 
     # ------------------------------------------------------------ get
-    def get(self, sequence: Union[str, Sequence[str]], *, remote: bool = False) -> Any:
+    @overload
+    def get(self, sequence: str, *, remote: bool = False) -> Alignment: ...
+
+    @overload
+    def get(self, sequence: Union[List[str], Tuple[str, ...]], *, remote: bool = False) -> List[Alignment]: ...
+
+    def get(self, sequence: Union[str, List[str], Tuple[str, ...]], *,
+            remote: bool = False) -> Union[Alignment, List[Alignment]]:
         """The alignment for one sequence, or a list of alignments for the
         chains of a complex (pass a list; identical chains are searched once).
 
@@ -152,7 +164,7 @@ class MSA:
         if remote_disabled():
             # A cached result sends nothing, so the kill switch allows it.
             if any(self._cache_get(seq_sha256(q)) is None for q in queries):
-                raise RemoteNotAllowed("SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to any server")
+                raise RemoteNotAllowed(http.NO_REMOTE_MESSAGE)
         done: Dict[str, Alignment] = {}
         for i, q in enumerate(queries, 1):
             if q not in done:
@@ -183,7 +195,11 @@ class MSA:
                     self._say(f"{what}: computed by another process while waiting")
                     return again
             if remote_disabled():
-                raise RemoteNotAllowed("SCIGANTIC_MSA_NO_REMOTE is set, so no sequence is sent to any server")
+                raise RemoteNotAllowed(http.NO_REMOTE_MESSAGE)
+            # A search that cannot start (no API key) must not say it is sending.
+            check = getattr(b, "check_ready", None)
+            if check is not None:
+                check()
             if not self.quiet:
                 announce(b)
             res = b.search(q)
@@ -234,6 +250,7 @@ def check_host(host: str, what: str = "--host") -> None:
     ("localhost:8080") gets an example of the right form. ``what`` names
     where the URL came from in the error."""
     host = host.strip()
+    http.refuse_credentials(host, what)
     http.require_ascii(host, what)
     parts = urllib.parse.urlsplit(host)
     if parts.scheme.lower() in ("http", "https"):

@@ -9,6 +9,13 @@ Writes go to a temporary file in the same directory and are renamed into
 place, so a reader never sees half a file. A per-key lock file stops two
 parallel jobs from computing the same alignment twice.
 
+On Windows the default is ``%LOCALAPPDATA%\\scigantic-msa\\cache``.
+``scigantic-msa cache`` prints the directory in use.
+
+Files are written 0600 and the directories under the cache directory are
+0700 (tightened when an older, looser one is written to), so other users
+of a shared machine cannot list which sequences were searched.
+
 Delete the directory to forget every alignment. Nothing in it is sent
 anywhere.
 """
@@ -20,12 +27,12 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, List, Optional
+from typing import IO, TYPE_CHECKING, Callable, List, Optional
 
 if TYPE_CHECKING:  # pragma: no cover
     from .alignment import Alignment
 
-__all__ = ["cache_dir", "atomic_write", "FileLock", "AlignmentCache"]
+__all__ = ["cache_dir", "atomic_write", "private_dirs", "FileLock", "AlignmentCache"]
 
 
 def cache_dir() -> Path:
@@ -37,6 +44,32 @@ def cache_dir() -> Path:
         return Path(base) / "scigantic-msa" / "cache"
     xdg = os.environ.get("XDG_CACHE_HOME")
     return (Path(xdg) if xdg else Path.home() / ".cache") / "scigantic-msa"
+
+
+def _owner_only(d: Path) -> None:
+    try:
+        os.chmod(d, 0o700)
+    except OSError:
+        pass  # not ours to change, or a file system without modes
+
+
+def private_dirs(path: Path, base: Path) -> None:
+    """Make directory ``path`` and every directory between ``base`` and it,
+    mode 0700, tightening any that exist with looser modes. ``base`` itself
+    is made 0700 only when it is created here: a cache directory the user
+    chose and made keeps the mode they gave it."""
+    if not base.is_dir():
+        base.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _owner_only(base)
+    d = base
+    for part in path.relative_to(base).parts:
+        d = d / part
+        try:
+            d.mkdir(mode=0o700)
+        except FileExistsError:
+            if not d.is_dir():
+                raise
+        _owner_only(d)
 
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
@@ -78,14 +111,19 @@ class FileLock:
     hold different files for the same key.
     """
 
-    def __init__(self, path: Path, timeout: float = 4 * 3600, poll: float = 0.5):
+    def __init__(self, path: Path, timeout: float = 4 * 3600, poll: float = 0.5,
+                 make_dir: Optional[Callable[[], None]] = None):
         self.path = Path(str(path) + ".lock")
         self.timeout = timeout
         self.poll = poll
+        self._make_dir = make_dir
         self._fh: Optional[IO[bytes]] = None
 
     def acquire(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self._make_dir is not None:
+            self._make_dir()
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + self.timeout
         while True:
             fh = open(self.path, "a+b")
@@ -186,8 +224,11 @@ class AlignmentCache:
     def path(self, sha: str, backend: str, dbkey: str) -> Path:
         return self._dir(sha) / f"{_safe(backend)}--{_safe(dbkey)}.msa.gz"
 
+    def _make_dir(self, sha: str) -> None:
+        private_dirs(self._dir(sha), self.root.parent)
+
     def lock(self, sha: str, backend: str, dbkey: str, timeout: float = 4 * 3600) -> FileLock:
-        return FileLock(self.path(sha, backend, dbkey), timeout=timeout)
+        return FileLock(self.path(sha, backend, dbkey), timeout=timeout, make_dir=lambda: self._make_dir(sha))
 
     def entries(self, sha: str) -> List[Path]:
         d = self._dir(sha)
@@ -222,13 +263,16 @@ class AlignmentCache:
                 continue
             if msa.seq_sha256 != sha:
                 continue
-            msa.provenance.setdefault("cached_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(p.stat().st_mtime)))
-            msa.provenance["cache_file"] = str(p)
+            # The path is kept on the object, not in provenance, so that a
+            # cached result's provenance is the fresh one's and no local
+            # path reaches the attribution file next to the model input.
+            msa.cache_path = str(p)
             return msa
         return None
 
     def put(self, msa: "Alignment", backend: str, dbkey: str) -> Path:
         p = self.path(msa.seq_sha256, backend, dbkey)
+        self._make_dir(msa.seq_sha256)
         atomic_write(p, msa.to_bundle(), mode=0o600)
         return p
 

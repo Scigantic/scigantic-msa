@@ -53,6 +53,9 @@ def isolated_env(tmp_path, monkeypatch):
     from scigantic_msa import remote
 
     remote._announced.clear()
+    from scigantic_msa import tool
+
+    monkeypatch.setattr(tool, "_cache_warned", False)
     yield
 
 

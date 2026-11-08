@@ -59,6 +59,9 @@ AF3_PROTEIN_KEYS = frozenset(
     {"id", "sequence", "modifications", "description", "unpairedMsa", "unpairedMsaPath",
      "pairedMsa", "pairedMsaPath", "templates"}
 )
+#: What to do when pyarrow is missing, for pip and for a uv tool install.
+PYARROW_HINT = ("writing Chai-1 files needs pyarrow: pip install 'scigantic-msa[chai]', or "
+                "uv tool install 'scigantic-msa[chai]' if you installed the command with uv")
 CHAI_SOURCES = ("query", "uniprot", "uniref90", "bfd_uniclust", "mgnify")
 #: Chai-1 pairs at most this many rows, the query included
 #: (``MAX_PAIRED_DEPTH`` in chai_lab's msas/preprocess.py).
@@ -113,6 +116,17 @@ def _pairing(ents: Sequence[Alignment], pairing: Optional[Pairing]) -> Pairing:
     return pair_by_species(ents)
 
 
+#: The provenance keys the attribution file keeps: where the alignment came
+#: from and when, nothing local. The job ticket (enough to download the
+#: result from a public server) and any cache path stay out of it.
+SIDECAR_PROVENANCE = ("from", "backend", "server", "mode", "databases", "computed_at", "experimental",
+                      "file", "uniprot_file")
+
+
+def _public_provenance(prov: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: prov[k] for k in SIDECAR_PROVENANCE if k in prov}
+
+
 def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], files: Dict[str, Any]) -> None:
     """Add this write to the attribution file in ``directory``.
 
@@ -130,7 +144,7 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
                 "summary": m.summary(),
                 "depth": m.depth,
                 "attribution": m.attribution,
-                "provenance": m.provenance,
+                "provenance": _public_provenance(m.provenance),
             }
             for m in chains
         ],
@@ -642,7 +656,7 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
         import pyarrow as pa
         import pyarrow.parquet as pq
     except ImportError:
-        raise ImportError("writing Chai-1 files needs pyarrow: pip install 'scigantic-msa[chai]'") from None
+        raise ImportError(PYARROW_HINT) from None
     d = Path(directory)
     ents = entities(chains)
     msas = [e[0] for e in ents]

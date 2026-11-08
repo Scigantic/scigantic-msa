@@ -1,11 +1,17 @@
-"""Remote MSA search backends. A sequence goes to one only when you ask with remote=True."""
+"""Remote MSA search backends.
+
+``MSA().get()`` uses one only when you pass remote=True. Calling a client's
+``search()`` yourself is that choice made in code, so it needs no
+remote=True. SCIGANTIC_MSA_NO_REMOTE wins over both: every client checks it
+before each request, and so does the HTTP layer underneath.
+"""
 from __future__ import annotations
 
-import os
 import sys
 import threading
 from typing import Any, Optional, Set
 
+from ..http import remote_disabled
 from .colabfold import DEFAULT_HOST, ColabFoldClient, JobFailed, RateLimited, RemoteError, RemoteResult, public_host
 from .nvidia import NvidiaClient
 
@@ -18,14 +24,6 @@ BACKENDS = ("colabfold", "nvidia")
 
 _announced: Set[str] = set()
 _lock = threading.Lock()
-
-
-def remote_disabled() -> bool:
-    """SCIGANTIC_MSA_NO_REMOTE turns every remote backend off, whatever the
-    code or config asks for. Any value but 0, false, no or off counts, so a
-    value we did not think of fails safe."""
-    value = os.environ.get("SCIGANTIC_MSA_NO_REMOTE", "").strip().lower()
-    return value not in ("", "0", "false", "no", "off")
 
 
 def make_backend(name: str, **kw: Any):
