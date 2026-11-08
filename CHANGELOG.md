@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.2.8
+
+Changes you may notice:
+
+- `SCIGANTIC_MSA_NO_REMOTE` now also stops `ColabFoldClient` and
+  `NvidiaClient` used directly. Every request checks it, in each client and
+  in the HTTP layer. Calling a client's `search()` yourself still needs no
+  `remote=True`; the README says so.
+- A ColabFold result read back from the cache labels its rows as the fresh
+  result did. MGnify rows in the environmental alignment stay `env`
+  (Chai-1 `bfd_uniclust`, as chai_lab's own ColabFold path labels them)
+  instead of becoming `mgnify`, so a rerun writes the same Chai-1 files.
+  Older cache entries are read with the same labels.
+- `scigantic-msa-attribution.json` no longer holds the cache file's path or
+  the server's job id. The README lists what it holds.
+- Cache folders are made readable only by you (0700), and older ones are
+  tightened when written to.
+- `scigantic-msa cache` prints the cache directory. The README names every
+  place it can be (`SCIGANTIC_MSA_CACHE`, `XDG_CACHE_HOME`, `~/.cache`,
+  `LOCALAPPDATA`).
+- `AlphaFold3.prepare(..., out_dir=..., inline=False)` writes the MSAs as
+  files next to the JSON, as the README said it could.
+
+Fixes:
+
+- A server URL with a user name or password (`http://user:pass@host`) is
+  refused, from `--host`, the environment variables and the clients, and
+  the password is not printed.
+- `MSA("nvidia").get(..., remote=True)` without `NVIDIA_API_KEY` no longer
+  says it is sending the sequence before it stops.
+- The short peptide hint is quoted (`'=MKVLAAG'`), which zsh needs.
+- A cached result has the same `templates` and provenance as the fresh one,
+  and `cache_path` is set on a cache hit too.
+- The unusable cache warning is printed once per process.
+- `MSA.get` has typed overloads: a str gives an `Alignment`, a list gives a
+  list of them.
+- The missing pyarrow message also gives the `uv tool install` form.
+
 ## 0.2.7
 
 Fixes, all in how AlphaFold 3 rows are ordered. No pair was ever at the
