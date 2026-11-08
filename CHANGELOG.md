@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.9
+
+Changes you may notice:
+
+- `SCIGANTIC_MSA_NO_REMOTE` set to only spaces now blocks, as the README
+  says any value but `0`, `false`, `no` or `off` does. An empty value is
+  still the same as not setting it.
+- A relative `XDG_CACHE_HOME` (or `LOCALAPPDATA` on Windows) is ignored, as
+  the XDG spec says, and the default under your home folder is used.
+- The cache's `alignments` folder is made 0700 the first time a run uses
+  the cache, even only to read it, so a cache made by 0.2.7 or older is
+  private after the upgrade without a new search.
+
+Fixes:
+
+- A server URL with a backslash is refused. `http://u:pass\@host` passed
+  the credentials check, printed the password and looked it up as a host
+  name. The check now reads the URL as urllib does, and every URL (from
+  `--host`, both environment variables, both clients and the NVIDIA
+  status URL) is checked for a user name or password first, so no error
+  repeats one (`//u:pass@host`, `http:/u:pass@host`, a fullwidth `@`).
+- `SCIGANTIC_MSA_NO_REMOTE` set while a request waits to be retried stops
+  the retry.
+- A `SCIGANTIC_MSA_CONTACT` that cannot go in an HTTP header (not Latin-1,
+  or with a line break) is refused with a clear message before anything
+  says it is sending, instead of a codec error after.
+
 ## 0.2.8
 
 Changes you may notice:
