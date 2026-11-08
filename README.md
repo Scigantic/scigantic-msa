@@ -224,16 +224,23 @@ rows by species across chains A, B, C (3 with chains A, B, C, 2 with
 chains A, B)". In a paired row, a chain without that species is filled in
 as each model expects: gaps for ColabFold and OpenFold3, gap rows that
 carry the pairing key for Chai-1, no key for Boltz, and one of its own
-unpaired rows for AlphaFold 3 (never a gap row, which would count in its
-profile).
+unpaired rows for AlphaFold 3. AlphaFold 3 joins unpaired rows by index,
+so each paired row sits at the same row in every chain that has it. A
+chain with too few rows of its own to stand in gets a gap row there, as
+Boltz does itself; such rows count in its profile, so the pairs are put in
+the order that needs the fewest, and the tool says how many each chain
+got.
 
-Several complexes can be written into one `--out` (`--name ab`, then
-`--name ac`). A file whose rows are paired for one complex never takes the
-plain per-sequence name another complex would rewrite: Boltz CSVs with
-pair keys are `<sha256>.<hash>.csv`, Chai-1 files of a complex with paired
-rows go in `msas/paired-<hash>/` (the printed command passes that folder
-to `--msa-directory`), and OpenFold3's paired files are under a folder
-named for their content. Files without pairing are shared.
+Several jobs can be written into one `--out` (`--name ab`, then `--name
+ac`, or two alignments of one sequence from `convert`, `--host` and the
+public server). Every MSA file is named, or put in a folder named, for its
+content, so one job never rewrites a file another reads, and identical
+files are shared: Boltz files are `<sha256>.<hash>.csv` or `.a3m`, Chai-1
+files go in `msas/paired-<hash>/` or `msas/unpaired-<hash>/` (the printed
+command passes that folder to `--msa-directory`), OpenFold3 folders are
+`main/<sha256>/<hash>/` and `paired/<hash>/<sha256>/`, Protenix folders
+are `<sha256>/<hash>/`, and AlphaFold 3 files with `inline=False` are
+`<sha256>.<hash>.unpaired.a3m`.
 
 | model | how pairing is passed on |
 | --- | --- |

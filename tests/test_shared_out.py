@@ -130,16 +130,18 @@ def test_chai_monomer_write_keeps_complex_pairing(abc, tmp_path):
 
 
 def test_unpaired_files_are_still_shared(abc, tmp_path):
-    """A file whose content depends only on its sequence keeps the plain
-    name, so writes share it."""
+    """Files are named for their content, so a file with the same content
+    in two writes is one file."""
     a, b, c = abc
     a2 = syn(A, [mut(A, i) for i in range(1, 4)], {})
     write_model("boltz", [a2, c], tmp_path, name="x", quiet=True)
     write_model("boltz", [a2, b], tmp_path, name="y", quiet=True)
-    csvs = sorted(p.name for p in (tmp_path / "boltz" / "msas").glob("*.csv"))
-    assert csvs == sorted({f"{m.seq_sha256}.csv" for m in (a2, b, c)})
+    csvs = sorted(p.name.split(".")[0] for p in (tmp_path / "boltz" / "msas").glob("*.csv"))
+    assert csvs == sorted(m.seq_sha256 for m in (a2, b, c))
     pytest.importorskip("pyarrow")
-    assert Chai.prepare([a2, c], out_dir=tmp_path / "chai", quiet=True) == (tmp_path / "chai").resolve()
+    d = Chai.prepare([a2, c], out_dir=tmp_path / "chai", quiet=True)
+    assert d.name.startswith("unpaired-") and Chai.prepare([a2, c], out_dir=tmp_path / "chai", quiet=True) == d
+    assert len(list((tmp_path / "chai").iterdir())) == 2  # the folder and the attribution file
 
 
 def test_af3_files_paired_for_one_complex_get_their_own_name(abc, tmp_path):
@@ -154,7 +156,8 @@ def test_af3_files_paired_for_one_complex_get_their_own_name(abc, tmp_path):
     for e in doc["sequences"]:
         assert (tmp_path / e["protein"]["unpairedMsaPath"]).read_text() == first[e["protein"]["sequence"]]
     mono = json.loads((tmp_path / "a.json").read_text())["sequences"][0]["protein"]
-    assert mono["unpairedMsaPath"] == f"{a.seq_sha256}.unpaired.a3m"
+    assert mono["unpairedMsaPath"].startswith(a.seq_sha256 + ".")
+    assert mono["unpairedMsaPath"] not in {e["protein"]["unpairedMsaPath"] for e in doc["sequences"]}
 
 
 # 2: a species in every chain was required, so a third chain from another
@@ -247,8 +250,8 @@ def test_every_writer_pairs_species_some_chains_share(model, abc, tmp_path):
 
 def test_af3_stands_in_own_rows_never_gap_rows(abc):
     """AlphaFold 3 joins unpaired rows by index, so a chain without a pair's
-    species gets one of its own rows there, not a gap row that would count
-    in its profile."""
+    species gets one of its own rows there, while it has one, not a gap row
+    that would count in its profile."""
     a, b, c = abc
     doc = AlphaFold3.prepare([a, b, c], quiet=True)
     for e, m in zip(doc["sequences"], (a, b, c)):

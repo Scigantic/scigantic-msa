@@ -106,7 +106,7 @@ def pair_by_species(msas: Sequence[Alignment], max_pairs: Optional[int] = 8192,
                      f"{_chains(label, with_species)}, and {no_species}")
         return Pairing(rows, keys, without, f"{what}; the chains get unpaired MSAs")
     if len(paired) == len(msas):
-        msg = f"paired {len(keys)} rows by species across {len(msas)} chains"
+        msg = f"paired {len(keys)} rows by species across {_count(label, range(len(msas)))} chains"
     else:
         msg = f"paired {len(keys)} rows by species across {_chains(label, paired)}"
     groups: Dict[tuple, int] = {}
@@ -132,5 +132,7 @@ def _count(label: Sequence[str], idx: Sequence[int]) -> int:
 
 def _chains(label: Sequence[str], idx: Sequence[int]) -> str:
     """"chain C" or "chains A, B" for a message. A label may name several
-    chains that share a sequence ("B, D")."""
-    return ("chain " if _count(label, idx) == 1 else "chains ") + ", ".join(label[i] for i in idx)
+    chains that share a sequence ("B, D"); the chains are named in their
+    own order, so A, B, A, C reads "chains A, B, C, D", not "A, C, B, D"."""
+    names = sorted((n for i in idx for n in label[i].split(", ")), key=lambda n: (len(n), n))
+    return ("chain " if len(names) == 1 else "chains ") + ", ".join(names)

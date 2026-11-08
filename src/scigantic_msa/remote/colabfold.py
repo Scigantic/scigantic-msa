@@ -28,6 +28,7 @@ import io
 import json
 import os
 import random
+import re
 import tarfile
 import time
 import urllib.parse
@@ -53,8 +54,8 @@ TERMS = (
 def public_host(host: str) -> bool:
     """True for any spelling of the public server's URL: another case, an
     explicit default port, a trailing slash, surrounding spaces, a path of
-    only dot segments (``/.``, ``/a/..``, ``/%2e/``) that the server reads
-    as ``/``, or a host name whose ASCII (IDNA) form is the public one."""
+    only dot segments and repeated slashes (``/.``, ``/a/..``, ``/%2e/``,
+    ``//.``) that the server reads as ``/``, or a host name whose ASCII (IDNA) form is the public one."""
     parts = urllib.parse.urlsplit(host.strip())
     try:
         port = parts.port
@@ -68,9 +69,11 @@ def public_host(host: str) -> bool:
 
 def _dot_free(path: str) -> str:
     """The path with its dot segments removed (RFC 3986, 5.2.4), after
-    decoding %2e, as a server does before it routes the request."""
+    decoding %2e and turning each run of slashes into one, as the server
+    does before it routes the request (it answers ``//./ticket/msa`` with a
+    redirect to ``/ticket/msa``)."""
     out: List[str] = []
-    segs = urllib.parse.unquote(path).split("/")
+    segs = re.sub(r"/{2,}", "/", urllib.parse.unquote(path)).split("/")
     for i, seg in enumerate(segs):
         last = i == len(segs) - 1
         if seg == "..":

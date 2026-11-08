@@ -13,6 +13,7 @@ from scigantic_msa.adapters import (
 )
 from scigantic_msa.alignment import Alignment
 from scigantic_msa.pairing import pair_by_species
+from scigantic_msa.writers import _tag
 
 
 def synthetic(query, hits, taxids=None, headers=None):
@@ -104,7 +105,9 @@ def test_boltz_monomer_yaml_and_absolute_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     m = real_alignment(Q_LITEFOLD)
     y = Boltz.prepare(m, out_dir="boltz/")
-    f = tmp_path / "boltz" / f"{m.seq_sha256}.a3m"
+    (f,) = (tmp_path / "boltz").glob("*.a3m")
+    # Named for the sequence and the content.
+    assert f.name == f"{m.seq_sha256}.{_tag(m.a3m())}.a3m"
     assert f.read_text() == m.a3m()
     assert y.startswith("version: 1\nsequences:\n  - protein:\n      id: A\n")
     assert f"      sequence: {Q_LITEFOLD}\n" in y and f'      msa: "{f}"\n' in y
@@ -143,7 +146,8 @@ def test_chai_files_are_named_for_lookup(dimer, tmp_path):
     d = Chai.prepare([a, b], out_dir=tmp_path / "chai")
     # Paired files go in a folder of their own for this complex.
     assert d.parent == (tmp_path / "chai").resolve() and d.name.startswith("paired-")
-    assert Chai.prepare(a, out_dir=tmp_path / "chai") == (tmp_path / "chai").resolve()
+    mono = Chai.prepare(a, out_dir=tmp_path / "chai")
+    assert mono.parent == (tmp_path / "chai").resolve() and mono.name.startswith("unpaired-")
     import hashlib
 
     for m in (a, b):
@@ -192,7 +196,7 @@ def test_protenix_monomer_layout(tmp_path):
     pc = jobs[0]["sequences"][0]["proteinChain"]
     assert pc["sequence"] == Q_6T33 and pc["count"] == 1
     up = Path(pc["unpairedMsaPath"])
-    assert up.is_absolute() and up.name == "non_pairing.a3m" and up.parent.name == m.seq_sha256
+    assert up.is_absolute() and up.name == "non_pairing.a3m" and up.parent.parent.name == m.seq_sha256
     assert up.read_text() == m.a3m()
     # Protenix pairs only complexes of different chains; a monomer gets no paired file.
     assert "pairedMsaPath" not in pc

@@ -81,8 +81,8 @@ def test_chai_reads_and_pairs_our_files(chains, tmp_path):
         pytest.skip("set SCIGANTIC_MSA_TEST_CHAI_PYTHON to an interpreter with chai_lab installed")
     pytest.importorskip("pyarrow")
     mono = chains(Q_6T33)
-    Chai.prepare(mono, out_dir=tmp_path / "m")
-    res = _run(py, "check_chai.py", tmp_path / "m", Q_6T33)[0]
+    d = Chai.prepare(mono, out_dir=tmp_path / "m")
+    res = _run(py, "check_chai.py", d, Q_6T33)[0]
     assert res["files"][0]["depth"] == mono.depth and res["files"][0]["length"] == len(Q_6T33)
     a, b = chains(Q_7M22A, want_uniprot=True), chains(Q_7M22C, want_uniprot=True)
     d = Chai.prepare([a, b], out_dir=tmp_path / "c", quiet=True)
@@ -109,8 +109,8 @@ def test_boltz_and_chai_read_a_real_colabfold_result(tmp_path):
     m = _live_result()
     res = _run(boltz_py, "check_boltz.py", *_msa_paths(Boltz.prepare(m, out_dir=tmp_path / "b")))[0]
     assert res["n"] == len({r.seq.replace("-", "").upper() for r in m.rows}) and res["n"] > 1000
-    Chai.prepare(m, out_dir=tmp_path / "c")
-    res = _run(chai_py, "check_chai.py", tmp_path / "c", m.query)[0]
+    d = Chai.prepare(m, out_dir=tmp_path / "c")
+    res = _run(chai_py, "check_chai.py", d, m.query)[0]
     assert res["files"][0]["length"] == len(m.query) and res["files"][0]["depth"] > 1000
 
 
@@ -305,3 +305,63 @@ def test_protenix_pairing_survives_a_second_write_and_a_stray_chain(tmp_path):
             assert len(set(row) - {None}) == 1
     # The stray chain gets no pairing.a3m.
     assert list(res["abc"]["chains"][2]["files"]) == ["non_pairing.a3m"]
+
+
+# Two alignments of one sequence in one folder: each job reads its own.
+
+
+def _two_alignments():
+    """Chain A twice, from two searches with other hits and species, and a
+    partner B that has every species."""
+    a1 = _server_chain(Q_7M22A, [("UniRef100_P11111", 2, "9606"), ("UniRef100_P22222", 6, "10090")])
+    a2 = _server_chain(Q_7M22A, [("UniRef100_P33333", 10, "7227"), ("UniRef100_P44444", 14, "4932"),
+                                 ("UniRef100_X5", 18, None)])
+    b = _server_chain(Q_7M22C, [("UniRef100_Q11111", 2, "9606"), ("UniRef100_Q22222", 6, "10090"),
+                                ("UniRef100_Q33333", 10, "7227"), ("UniRef100_Q44444", 14, "4932")])
+    return a1, a2, b
+
+
+def test_boltz_reads_each_jobs_own_alignment_of_a_sequence(tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_BOLTZ_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_BOLTZ_PYTHON to an interpreter with boltz installed")
+    a1, a2, b = _two_alignments()
+    x = _msa_paths(Boltz.prepare(a1, out_dir=tmp_path, quiet=True))
+    xb = _msa_paths(Boltz.prepare([a1, b], out_dir=tmp_path, quiet=True))
+    y = _msa_paths(Boltz.prepare(a2, out_dir=tmp_path, quiet=True))
+    yb = _msa_paths(Boltz.prepare([a2, b], out_dir=tmp_path, quiet=True))
+    assert [r["n"] for r in _run(py, "check_boltz.py", *x, *y)] == [a1.depth, a2.depth]
+    for files in (xb, yb):
+        ta, tb = (set(r["taxonomy"]) - {-1} for r in _run(py, "check_boltz.py", *files))
+        assert len(ta & tb) == 2
+
+
+def test_chai_reads_each_jobs_own_alignment_of_a_sequence(tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_CHAI_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_CHAI_PYTHON to an interpreter with chai_lab installed")
+    pytest.importorskip("pyarrow")
+    a1, a2, b = _two_alignments()
+    x = Chai.prepare(a1, out_dir=tmp_path, quiet=True)
+    xb = Chai.prepare([a1, b], out_dir=tmp_path, quiet=True)
+    y = Chai.prepare(a2, out_dir=tmp_path, quiet=True)
+    yb = Chai.prepare([a2, b], out_dir=tmp_path, quiet=True)
+    assert _run(py, "check_chai.py", x, a1.query)[0]["files"][0]["depth"] == a1.depth
+    assert _run(py, "check_chai.py", y, a2.query)[0]["files"][0]["depth"] == a2.depth
+    # Chai counts the query as a paired row.
+    assert _run(py, "check_chai.py", xb, a1.query, b.query)[0]["paired_rows"] == 3
+    assert _run(py, "check_chai.py", yb, a2.query, b.query)[0]["paired_rows"] == 3
+
+
+def test_protenix_reads_each_jobs_own_alignment_of_a_sequence(tmp_path):
+    py = _py("SCIGANTIC_MSA_TEST_PROTENIX_PYTHON")
+    if not py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_PROTENIX_PYTHON to an interpreter that can import protenix")
+    a1, a2, b = _two_alignments()
+    jsons = []
+    for name, chains in (("x", [a1, b]), ("y", [a2, b])):
+        jsons.append(tmp_path / f"{name}.json")
+        jsons[-1].write_text(json.dumps(Protenix.prepare(chains, out_dir=tmp_path / "msas", name=name, quiet=True)))
+    res = {r["name"]: r for r in _run(py, "check_protenix.py", *jsons, env={"PROTENIX_ROOT_DIR": str(tmp_path / "px")})}
+    assert res["x"]["paired_species"][0] == ["", "9606", "10090"]
+    assert res["y"]["paired_species"][0] == ["", "7227", "4932"]

@@ -179,7 +179,11 @@ class AlphaFold3:
             else:
                 pr = _pairing_note(chains, quiet)
                 if pr is not None and pr.n_paired:
-                    _say("run AlphaFold 3 with --resolve_msa_overlaps=false so it keeps the paired rows", quiet)
+                    lay = writers.af3_layout(msas, pr, _chain_names(chains))
+                    _say(f"AlphaFold 3 gets the {lay.n_paired} paired rows at the same row in every chain that has "
+                         "them; run it with --resolve_msa_overlaps=false so it keeps them", quiet)
+                    if lay.note():
+                        _say(lay.note(), quiet)
         # AlphaFold 3 keeps dots in the output directory it makes from the
         # name, so a name of ".." would write outside --output_dir.
         doc = writers.write_af3_json(chains, path, input=input, name=_safe_name(name) if name else None,
@@ -269,16 +273,17 @@ class Chai:
     runs the chain without an MSA, so ``prepare`` checks every name. Rows
     paired by species share a ``pairing_key``, and a chain without a row for
     a key gets a gap row with it (Chai pairs a key only when every chain has
-    it). Those keys belong to one complex, so a complex with paired rows
-    gets its own folder. Needs pyarrow.
+    it). Each set of files goes in a folder named for its content, so
+    another complex or another alignment of a chain cannot rewrite it.
+    Needs pyarrow.
     """
 
     @staticmethod
     def prepare(results: Results, sequence: Any = None, *, out_dir: Any, quiet: bool = False) -> Path:
         """Write the parquet files and return the folder that holds them:
-        pass it to ``chai-lab fold --msa-directory``. That is ``out_dir``,
-        or for a complex with paired rows ``out_dir/paired-<hash>/``, so
-        another complex sharing a chain cannot rewrite its files."""
+        pass it to ``chai-lab fold --msa-directory``. That is
+        ``out_dir/paired-<hash>/`` for a complex with paired rows and
+        ``out_dir/unpaired-<hash>/`` otherwise, named for the content."""
         chains = _chains(results, sequence)
         d = _out(out_dir)
         pr = _pairing_note(chains, quiet)
@@ -519,9 +524,11 @@ class Protenix:
     @staticmethod
     def prepare(results: Results, sequence: Any = None, *, out_dir: Any, name: str = "query",
                 quiet: bool = False) -> List[dict]:
-        """Write ``<out_dir>/<seq_sha256>/non_pairing.a3m`` (and
+        """Write ``<out_dir>/<seq_sha256>/<hash>/non_pairing.a3m`` (and
         ``pairing.a3m`` for a complex whose chains share species) and return
-        the input as a list with one job, ready for ``json.dump``."""
+        the input as a list with one job, ready for ``json.dump``. ``<hash>``
+        is of the folder's content, so another alignment of the sequence in
+        the same ``out_dir`` gets a folder of its own."""
         chains = _chains(results, sequence)
         dist = _distinct(chains)
         for m, idx in dist:
@@ -546,18 +553,24 @@ class Protenix:
                 notes.append("no pairing.a3m: no two chains share a species Protenix can read")
             _say(f"Protenix: {notes[0]}", quiet)
         seqs = []
+        files: Dict[str, List[str]] = {}
         for m, idx in dist:
-            cdir = d / m.seq_sha256
-            unpaired = cdir / "non_pairing.a3m"
-            writers._atomic_write(unpaired, m.a3m())
-            pc: Dict[str, Any] = {"sequence": m.query, "count": len(idx), "unpairedMsaPath": str(unpaired)}
+            texts = {"non_pairing.a3m": m.a3m()}
             if m.query in pairing:
-                paired = cdir / "pairing.a3m"
-                writers._atomic_write(paired, format_a3m(pairing[m.query]))
-                pc["pairedMsaPath"] = str(paired)
+                texts["pairing.a3m"] = format_a3m(pairing[m.query])
+            # The file names are fixed, so each set of files gets a folder
+            # named for its content: another alignment of this sequence in
+            # the same out_dir must not rewrite the files this job reads.
+            cdir = d / m.seq_sha256 / writers._tag(json.dumps(texts, sort_keys=True))
+            for fname, text in texts.items():
+                writers._atomic_write(cdir / fname, text)
+            pc: Dict[str, Any] = {"sequence": m.query, "count": len(idx),
+                                  "unpairedMsaPath": str(cdir / "non_pairing.a3m")}
+            if "pairing.a3m" in texts:
+                pc["pairedMsaPath"] = str(cdir / "pairing.a3m")
             seqs.append({"proteinChain": pc})
-        writers._sidecar(d, chains, notes,
-                         {m.seq_sha256: [n for n in PROTENIX_FILES if (d / m.seq_sha256 / n).is_file()] for m in msas})
+            files[m.seq_sha256] = [os.path.relpath(cdir / n, d) for n in PROTENIX_FILES if n in texts]
+        writers._sidecar(d, chains, notes, files)
         # Protenix makes an output directory from the job name.
         jobs = [{"name": _safe_name(name), "sequences": seqs}]
         Protenix.check(jobs)

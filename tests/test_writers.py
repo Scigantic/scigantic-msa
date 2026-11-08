@@ -1,5 +1,6 @@
 import csv
 import json
+from pathlib import Path
 
 import pytest
 
@@ -8,7 +9,7 @@ from scigantic_msa.a3m import Row, match_length, parse_a3m, parse_colabfold_comp
 from scigantic_msa.alignment import Alignment
 from scigantic_msa.pairing import pair_by_species
 from scigantic_msa.writers import (
-    ATTRIBUTION_FILE, chai_expected_basename, write_af3_json, write_boltz, write_chai, write_colabfold, write_openfold3,
+    ATTRIBUTION_FILE, _tag, chai_expected_basename, write_af3_json, write_boltz, write_chai, write_colabfold, write_openfold3,
 )
 
 
@@ -59,7 +60,7 @@ def test_af3_path_mode(tmp_path):
     m = real_alignment(Q_6T33)
     doc = write_af3_json([m], tmp_path / "in.json", inline=False)
     prot = doc["sequences"][0]["protein"]
-    assert "unpairedMsa" not in prot and prot["unpairedMsaPath"] == f"{m.seq_sha256}.unpaired.a3m"
+    assert "unpairedMsa" not in prot and prot["unpairedMsaPath"] == f"{m.seq_sha256}.{_tag(m.a3m())}.unpaired.a3m"
     assert (tmp_path / prot["unpairedMsaPath"]).exists() and prot["pairedMsa"] == ""
 
 
@@ -89,7 +90,7 @@ def test_af3_complex_prepaired_by_taxid(tmp_path):
 def test_boltz_monomer_and_complex(tmp_path):
     m = real_alignment(Q_6T33)
     line = write_boltz([m], tmp_path / "b1")[0]
-    p = tmp_path / "b1" / f"{m.seq_sha256}.a3m"
+    p = tmp_path / "b1" / f"{m.seq_sha256}.{_tag(m.a3m())}.a3m"
     assert line == f"msa: {p}" and p.read_text() == m.a3m()
     a, b = real_alignment(Q_7M22A, with_uniprot=True), real_alignment(Q_7M22C, with_uniprot=True)
     lines = write_boltz([a, b], tmp_path / "b2")
@@ -150,8 +151,8 @@ def test_openfold3_dirs(tmp_path):
     a, b = real_alignment(Q_7M22A, with_uniprot=True), real_alignment(Q_7M22C, with_uniprot=True)
     fields = write_openfold3([a, b], tmp_path / "of3")
     for f, m in zip(fields, (a, b)):
-        d = tmp_path / "of3" / "main" / m.seq_sha256
-        assert f["main_msa_file_paths"] == str(d)
+        d = Path(f["main_msa_file_paths"])
+        assert d.parent == tmp_path / "of3" / "main" / m.seq_sha256
         assert (d / "colabfold_main.a3m").read_text() == m.a3m()
         assert parse_a3m((d / "uniprot_hits.a3m").read_text(), m.query)[1].header.startswith(("tr|", "sp|"))
         assert "paired_msa_file_paths" not in f

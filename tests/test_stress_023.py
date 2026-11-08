@@ -84,9 +84,9 @@ def test_chai_parallel_writers_to_one_directory(tmp_path):
     with ThreadPoolExecutor(8) as ex:
         errs = [e for r in ex.map(work, range(8)) for e in r]
     assert errs == [], f"{len(errs)} of 80 concurrent writes failed: {sorted(set(errs))}"
-    (f,) = (tmp_path / "msas").glob("*.pqt")
+    (f,) = (tmp_path / "msas").glob("*/*.pqt")
     assert pq.read_table(f).num_rows == 2001
-    assert not list((tmp_path / "msas").glob(".*.tmp"))
+    assert not list((tmp_path / "msas").glob("**/.*.tmp"))
 
 
 # 3: the public server was recognised only by its exact URL, so these got

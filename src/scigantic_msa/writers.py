@@ -18,23 +18,24 @@ with an MSA has it), no key for Boltz (it fills the chain with its next
 unpaired row), and nothing for AlphaFold 3 (its unpaired rows stay as they
 are).
 
-Files for one chain are named by its sequence and shared by every write into
-the folder, but only while their content belongs to that sequence alone. A
-file whose rows are placed or keyed for one complex (Boltz pair keys, rows
-paired first for AlphaFold 3, Chai-1 pairing keys and gap rows, OpenFold3
-paired rows) gets a name, or a folder, with a hash of that content. So a
-second complex sharing a chain (A+B, then A+C or A alone) into the same
-folder never rewrites a file the first one points at.
+Every MSA file is named by its sequence and a hash of its content, or, where
+the model fixes the file name (Chai-1, OpenFold3, Protenix), put in a folder
+named for the content. So a second complex sharing a chain (A+B, then A+C or
+A alone), or another alignment of the same sequence, written into the same
+folder never rewrites a file the first one points at, and writes with the
+same content share one file.
 """
 from __future__ import annotations
 
 import copy
 import hashlib
+import itertools
 import json
 import os
 import secrets
 import string
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -62,6 +63,9 @@ CHAI_SOURCES = ("query", "uniprot", "uniref90", "bfd_uniclust", "mgnify")
 #: Chai-1 pairs at most this many rows, the query included
 #: (``MAX_PAIRED_DEPTH`` in chai_lab's msas/preprocess.py).
 CHAI_MAX_PAIRED = 8192
+#: Boltz pairs at most this many rows, the query included
+#: (``max_pairs`` of ``construct_paired_msa`` in boltz's featurizerv2.py).
+BOLTZ_MAX_PAIRED = 8192
 
 
 def _atomic_write(path: Path, data: "str | bytes") -> None:
@@ -208,52 +212,125 @@ def _gap_row(m: Alignment, k: int) -> Row:
     return Row(f"gap_{k} no species information", "-" * len(m.query), "gap")
 
 
-def _af3_key(seq: str) -> str:
-    """What AlphaFold 3 deduplicates MSA rows on: the row with insertions
-    (lowercase) removed (``msa.py``)."""
-    return "".join(c for c in seq if not c.islower())
+@dataclass
+class AF3Layout:
+    """Where each chain's rows go in AlphaFold 3's ``unpairedMsa``.
+
+    ``rows`` maps a chain's sequence to its rows, query first. ``gaps``
+    maps the label of a chain to the gap rows it needed. ``n_paired`` is
+    how many rows pair at their own index in every chain that has them,
+    which is every pair."""
+
+    rows: Dict[str, List[Row]]
+    gaps: Dict[str, int]
+    n_paired: int
+
+    def note(self) -> str:
+        """What the layout costs, for the user; "" when nothing."""
+        if not self.gaps:
+            return ""
+        many = len(self.gaps) > 1
+        who = "; ".join(f"{'chains' if ', ' in c else 'chain'} {c}: {n}" for c, n in self.gaps.items())
+        return (f"AlphaFold 3 joins unpaired rows by index, so a chain without a row of a paired species "
+                f"needs a row there; {'these chains have' if many else 'this chain has'} too few rows of "
+                f"{'their' if many else 'its'} own and {'get' if many else 'gets'} gap rows instead "
+                f"({who}), which count in {'their' if many else 'its'} profile. "
+                f"All {self.n_paired} paired rows stay at their own row")
 
 
-def _unpaired_with_prepaired(m: Alignment, paired: Sequence[Optional[Row]]) -> List[Row]:
-    """Query, then one row per paired species, then the remaining rows.
+def af3_layout(msas: Sequence[Alignment], pr: Pairing, names: Optional[Sequence[str]] = None) -> AF3Layout:
+    """Lay out the paired rows of ``pr`` for AlphaFold 3.
 
-    AlphaFold 3 joins unpaired rows across chains by row index, so row k+1
-    must hold pair k in every chain that has it. Where this chain has no row
-    for pair k, its next unpaired row stands in, as Boltz does; never a gap
-    row, which would count in this chain's profile. After its last paired row
-    the chain simply ends its paired part, and AlphaFold 3 pads it."""
-    q = m.rows[0]
-    seen = {ungapped(q.seq), _af3_key(q.seq)}
-    out = [q]
+    AlphaFold 3 joins the ``unpairedMsa`` rows of all chains by row index
+    (``merge_msa_features`` in its ``merging_features.py``), and reads a
+    user MSA as given (``deduplicate=False`` in ``features.py``). So pair
+    k must be at the same row in every chain that has it. A chain without
+    a row for pair k puts its next unpaired row there, as Boltz does in
+    ``construct_paired_msa``, and a gap row only once it has none left, as
+    Boltz also does: a gap row counts in that chain's profile, but a paired
+    row at another pair's index would pair it with the wrong species.
 
-    def fresh(r: Row) -> bool:
-        k1, k2 = ungapped(r.seq), _af3_key(r.seq)
-        if k1 in seen or k2 in seen:
-            return False
-        seen.update((k1, k2))
-        return True
+    To need as few gap rows as possible, the pairs are reordered when the
+    given order would need any: pairs are taken in groups of the chains
+    that share them, and the order of the groups with the fewest gap rows
+    is used, so the rows a shallow chain takes part in come first. A
+    chain with no species keeps its rows as they are."""
+    label = list(names) if names is not None else [str(i + 1) for i in range(len(msas))]
+    n = pr.n_paired
+    rows: Dict[str, List[Row]] = {m.query: dedupe_rows(m.rows) for m in msas}
+    if not n:
+        return AF3Layout(rows, {}, 0)
+    live = [c for c in range(len(msas)) if c not in pr.chains_without_species]
+    held = {c: [k for k in range(n) if pr.rows[c][k] is not None] for c in live}
+    spare: Dict[int, List[Row]] = {}
+    for c in live:
+        m = msas[c]
+        # A row with the residues of one of the chain's paired rows would
+        # repeat it, so it never stands in.
+        keys = {ungapped(r.seq) for r in pr.rows[c] if r is not None}
+        spare[c] = [r for r in rows[m.query][1:] if ungapped(r.seq) not in keys]
 
-    usable = [r is not None and ungapped(r.seq) not in seen for r in paired]
-    taken = {id(r) for r in paired if r is not None}
-    rest = iter([r for r in m.rows[1:] if id(r) not in taken])
-    last = max((k for k, u in enumerate(usable) if u), default=-1)
-    for k in range(last + 1):
-        r = paired[k]
-        if r is not None and fresh(r):
-            out.append(r)
-            continue
-        for f in rest:
-            if fresh(f):
-                out.append(f)
-                break
+    def cost(order: Sequence[int]) -> int:
+        pos = {k: i for i, k in enumerate(order)}
+        total = 0
+        for c in live:
+            if held[c]:
+                need = max(pos[k] for k in held[c]) + 1 - len(held[c])
+                total += max(0, need - len(spare[c]))
+        return total
+
+    order = list(range(n))
+    now = cost(order)
+    if now:
+        groups: Dict[Tuple[int, ...], List[int]] = {}
+        for k in range(n):
+            groups.setdefault(tuple(c for c in live if pr.rows[c][k] is not None), []).append(k)
+        gs = list(groups.items())
+
+        def group_cost(perm: Sequence[Tuple[Tuple[int, ...], List[int]]]) -> int:
+            # The same as cost() of the keys group by group, without
+            # walking every key.
+            total = 0
+            for c in live:
+                last = max((i for i, (who, _) in enumerate(perm) if c in who), default=-1)
+                need = sum(len(ks) for who, ks in perm[:last] if c not in who)
+                total += max(0, need - len(spare[c]))
+            return total
+
+        if len(gs) <= 7:
+            candidates: Any = itertools.permutations(gs)
         else:
-            # Too few rows of its own to stand in: the rest of its paired
-            # rows follow as ordinary rows.
-            out += [p for p in paired[k + 1:] if p is not None and fresh(p)]
-            return out
-    out += [r for r in rest if fresh(r)]
-    out += [r for r in paired[last + 1:] if r is not None and fresh(r)]
-    return out
+            candidates = [gs, sorted(gs, key=lambda g: min(len(spare[c]) for c in g[0]))]
+        best = None
+        for perm in candidates:
+            c_ = group_cost(perm)
+            if best is None or c_ < best[0]:
+                best = (c_, perm)
+                if not c_:
+                    break
+        assert best is not None
+        if best[0] < now:
+            order = [k for _, ks in best[1] for k in ks]
+    gaps: Dict[str, int] = {}
+    for c in live:
+        m = msas[c]
+        out = [rows[m.query][0]]
+        rest = iter(spare[c])
+        last = max((i for i, k in enumerate(order) if pr.rows[c][k] is not None), default=-1)
+        g = 0
+        for i in range(last + 1):
+            r = pr.rows[c][order[i]]
+            if r is None:
+                r = next(rest, None)
+            if r is None:
+                g += 1
+                r = Row(f"gap_{i + 1} keeps paired rows aligned", "-" * len(m.query), "gap")
+            out.append(r)
+        out += list(rest)
+        rows[m.query] = out
+        if g:
+            gaps[label[c]] = g
+    return AF3Layout(rows, gaps, n)
 
 
 # --------------------------------------------------------------------------- ColabFold
@@ -353,13 +430,14 @@ def write_af3_json(
             pr = _pairing(msas, pairing)
             notes.append(pr.message)
             if pr.n_paired:
-                for c, m in enumerate(msas):
-                    if c not in pr.chains_without_species:
-                        unpaired_rows[m.query] = _unpaired_with_prepaired(m, pr.rows[c])
+                lay = af3_layout(msas, pr, _entity_names(ents))
+                unpaired_rows = lay.rows
                 notes.append(
-                    "rows paired by taxid are first in unpairedMsa; run AlphaFold 3 with "
-                    "--resolve_msa_overlaps=false so it keeps them"
+                    f"the {lay.n_paired} rows paired by taxid are first in unpairedMsa, each at the same row in "
+                    "every chain that has it; run AlphaFold 3 with --resolve_msa_overlaps=false so it keeps them"
                 )
+                if lay.note():
+                    notes.append(lay.note())
     if doc is None:
         letters = iter(_chain_ids())
         seqs = []
@@ -407,14 +485,14 @@ def write_af3_json(
             prot["pairedMsa"] = pa
         else:
             assert out_path is not None
-            # Rows placed for this complex make a file of its own.
-            fn = (f"{m.seq_sha256}.unpaired.a3m" if up == format_a3m(dedupe_rows(m.rows))
-                  else f"{m.seq_sha256}.{_tag(up)}.unpaired.a3m")
+            # Named for the content, so another alignment of this sequence,
+            # or rows placed for another complex, get a file of their own.
+            fn = f"{m.seq_sha256}.{_tag(up)}.unpaired.a3m"
             _atomic_write(out_path.parent / fn, up)
             prot["unpairedMsaPath"] = fn
             files[m.seq_sha256] = {"unpaired": fn}
             if pa:
-                pfn = f"{m.seq_sha256}.paired.a3m"
+                pfn = f"{m.seq_sha256}.{_tag(pa)}.paired.a3m"
                 _atomic_write(out_path.parent / pfn, pa)
                 prot["pairedMsaPath"] = pfn
                 files[m.seq_sha256]["paired"] = pfn
@@ -440,6 +518,12 @@ def write_af3_json(
     return doc
 
 
+def _entity_names(ents: Sequence[Tuple[Alignment, int, List[int]]]) -> List[str]:
+    """For each distinct sequence, the chain ids that have it ("B, D")."""
+    ids = list(itertools.islice(_chain_ids(), max(i for _, _, idx in ents for i in idx) + 1))
+    return [", ".join(ids[i] for i in idx) for _, _, idx in ents]
+
+
 def _chain_ids():
     for c in string.ascii_uppercase:
         yield c
@@ -454,13 +538,13 @@ def _chain_ids():
 def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing: Optional[Pairing] = None) -> List[str]:
     """Write Boltz MSA files and return one YAML ``msa:`` line per chain.
 
-    A single distinct sequence gets ``<seq_sha256>.a3m``. Several get
-    a ``.csv`` (header ``key,sequence``): the query has key -1, rows paired
-    by species get the pair index (Boltz pairs equal keys), the rest -1. A
-    chain with pair keys gets ``<seq_sha256>.<hash>.csv``, since its keys
-    only mean something next to this complex's other files; one without
-    gets ``<seq_sha256>.csv``. Boltz refuses ``.a3m.gz``, so files are never
-    compressed.
+    A single distinct sequence gets an ``.a3m``. Several get a ``.csv``
+    (header ``key,sequence``): the query has key -1, rows paired by species
+    get the pair index (Boltz pairs equal keys), the rest -1. Every file is
+    ``<seq_sha256>.<hash>.<ext>``, the hash of its content: pair keys mean
+    something only next to one complex's other files, and another alignment
+    of the same sequence must not rewrite this one. Identical files share a
+    name. Boltz refuses ``.a3m.gz``, so files are never compressed.
     """
     d = Path(directory)
     ents = entities(chains)
@@ -469,26 +553,27 @@ def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing
     paths: Dict[str, Path] = {}
     if len(msas) == 1:
         m = msas[0]
-        p = d / f"{m.seq_sha256}.a3m"
-        _atomic_write(p, m.a3m())
+        text = m.a3m()
+        p = d / f"{m.seq_sha256}.{_tag(text)}.a3m"
+        _atomic_write(p, text)
         paths[m.query] = p
     else:
         pr = _pairing(msas, pairing)
         notes.append(pr.message)
         for c, m in enumerate(msas):
             lines = ["key,sequence", f"-1,{m.query}"]
-            for k, r in enumerate(pr.rows[c], 1):
+            # Pairs past Boltz's cap stay in the file as unpaired rows:
+            # Boltz drops a keyed row it does not pair.
+            keyed = [r for r in pr.rows[c][:BOLTZ_MAX_PAIRED - 1]]
+            for k, r in enumerate(keyed, 1):
                 if r is not None:
                     lines.append(f"{k},{r.seq}")
-            used = {id(r) for r in pr.rows[c] if r is not None}
+            used = {id(r) for r in keyed if r is not None}
             for r in m.rows[1:]:
                 if id(r) not in used:
                     lines.append(f"-1,{r.seq}")
             text = "\n".join(lines) + "\n"
-            # Pair keys mean something only next to this complex's other
-            # files, so a keyed file gets a name of its own.
-            keyed = any(r is not None for r in pr.rows[c])
-            p = d / (f"{m.seq_sha256}.{_tag(text)}.csv" if keyed else f"{m.seq_sha256}.csv")
+            p = d / f"{m.seq_sha256}.{_tag(text)}.csv"
             _atomic_write(p, text)
             paths[m.query] = p
     _sidecar(d, chains, notes, {m.seq_sha256: paths[m.query].name for m in msas})
@@ -520,11 +605,13 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
     Chai-1 looks up in ``--msa-directory``. Needs pyarrow
     (``pip install 'scigantic-msa[chai]'``).
 
-    A complex with paired rows goes in a folder of its own,
-    ``<directory>/paired-<hash>/``: Chai-1 finds a file only by the
-    sequence, and its pairing keys and gap rows belong to this complex, so
-    another complex sharing a chain must not rewrite it. Pass the folder of
-    the returned paths to ``--msa-directory``."""
+    The files go in a folder named for their content,
+    ``<directory>/paired-<hash>/`` for a complex with paired rows and
+    ``<directory>/unpaired-<hash>/`` otherwise: Chai-1 finds a file only by
+    the sequence, so another alignment of a chain, or another complex
+    sharing it, must not rewrite a file this one reads. Identical files
+    share a folder. Pass the folder of the returned paths to
+    ``--msa-directory``."""
     try:
         import pyarrow as pa
         import pyarrow.parquet as pq
@@ -555,9 +642,10 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
             "pairing_key": [keyed.get(id(r), "") for r in rows],
             "comment": [r.header for r in rows],
         })
-    where = d
-    if pr is not None and pr.n_paired:
-        where = d / f"paired-{_tag(json.dumps([[m.seq_sha256, col] for m, col in zip(msas, columns)]))}"
+    # Chai-1 finds a file only by its sequence, in one folder, so each set
+    # of files gets a folder named for its content.
+    kind = "paired" if pr is not None and pr.n_paired else "unpaired"
+    where = d / f"{kind}-{_tag(json.dumps([[m.seq_sha256, col] for m, col in zip(msas, columns)]))}"
     out: Dict[str, Path] = {}
     for m, col in zip(msas, columns):
         name = chai_expected_basename(m.query)
@@ -582,9 +670,10 @@ def write_openfold3(chains: Sequence[Alignment], directory: "str | Path", *, pai
     """Write OpenFold3 MSA directories and return, per chain, the fields to
     put in that chain of the query JSON.
 
-    ``<dir>/main/<seq_sha256>/colabfold_main.a3m`` holds the unpaired rows,
-    plus ``uniprot_hits.a3m`` when UniProt rows exist (OpenFold3 pairs those
-    by species itself). If some chain has no UniProt rows, rows paired by
+    ``<dir>/main/<seq_sha256>/<hash>/colabfold_main.a3m`` holds the unpaired
+    rows, plus ``uniprot_hits.a3m`` when UniProt rows exist (OpenFold3 pairs
+    those by species itself). ``<hash>`` is of the folder's content, so
+    another alignment of the sequence gets a folder of its own. If some chain has no UniProt rows, rows paired by
     taxid go to ``<dir>/paired/<complex>/<seq_sha256>/colabfold_paired.a3m``.
     """
     d = Path(directory)
@@ -612,10 +701,14 @@ def write_openfold3(chains: Sequence[Alignment], directory: "str | Path", *, pai
     elif len(msas) > 1:
         notes.append("uniprot_hits.a3m written for every chain; OpenFold3 pairs them by species")
     for m in msas:
-        mdir = d / "main" / m.seq_sha256
-        _atomic_write(mdir / "colabfold_main.a3m", m.a3m())
+        main = {"colabfold_main.a3m": m.a3m()}
         if m.uniprot_rows and len(m.uniprot_rows) > 1 and (all_uniprot or len(msas) == 1):
-            _atomic_write(mdir / "uniprot_hits.a3m", format_a3m(m.uniprot_rows or []))
+            main["uniprot_hits.a3m"] = format_a3m(m.uniprot_rows or [])
+        # OpenFold3 reads every file in the folder, and the file names are
+        # fixed, so each set of files gets a folder named for its content.
+        mdir = d / "main" / m.seq_sha256 / _tag(json.dumps(main, sort_keys=True))
+        for fname, text in main.items():
+            _atomic_write(mdir / fname, text)
         f = {"main_msa_file_paths": str(mdir)}
         if m.query in paired_dirs:
             f["paired_msa_file_paths"] = str(paired_dirs[m.query])
