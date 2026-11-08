@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.7
+
+Fixes, all in how AlphaFold 3 rows are ordered. No pair was ever at the
+wrong row; these orders needed gap rows that a better order avoids.
+
+- A chain that shares no species with any other chain no longer makes the
+  search pick an order with avoidable gap rows.
+- With more than 7 groups of pairs, a greedy order is tried as well, so a
+  shallow chain's pairs go first when that avoids gap rows.
+- The gap-row notice counts chains, not distinct sequences, and says when
+  a count is per chain (`chains A, C: 1 each`).
+
 ## 0.2.6
 
 Changes you may notice:

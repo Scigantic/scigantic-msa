@@ -229,8 +229,9 @@ class AF3Layout:
         """What the layout costs, for the user; "" when nothing."""
         if not self.gaps:
             return ""
-        many = len(self.gaps) > 1
-        who = "; ".join(f"{'chains' if ', ' in c else 'chain'} {c}: {n}" for c, n in self.gaps.items())
+        many = sum(len(c.split(", ")) for c in self.gaps) > 1
+        who = "; ".join(f"{'chains' if ', ' in c else 'chain'} {c}: {n} each" if ', ' in c
+                        else f"chain {c}: {n}" for c, n in self.gaps.items())
         return (f"AlphaFold 3 joins unpaired rows by index, so a chain without a row of a paired species "
                 f"needs a row there; {'these chains have' if many else 'this chain has'} too few rows of "
                 f"{'their' if many else 'its'} own and {'get' if many else 'gets'} gap rows instead "
@@ -293,14 +294,39 @@ def af3_layout(msas: Sequence[Alignment], pr: Pairing, names: Optional[Sequence[
             total = 0
             for c in live:
                 last = max((i for i, (who, _) in enumerate(perm) if c in who), default=-1)
+                if last < 0:
+                    continue
                 need = sum(len(ks) for who, ks in perm[:last] if c not in who)
                 total += max(0, need - len(spare[c]))
             return total
 
+        def greedy(gs: List[Tuple[Tuple[int, ...], List[int]]]) -> List[Tuple[Tuple[int, ...], List[int]]]:
+            # Place next the group that adds the fewest gap rows to the
+            # chains still waiting for a group of their own; among equals,
+            # the one that finishes most chains, then the smallest.
+            need = {c: 0 for c in live}
+            left = {c: sum(c in who for who, _ in gs) for c in live}
+            todo, out = list(gs), []
+            while todo:
+                def score(g: Tuple[Tuple[int, ...], List[int]]) -> Tuple[int, int, int]:
+                    who, ks = g
+                    add = sum(max(0, need[c] + len(ks) - len(spare[c])) - max(0, need[c] - len(spare[c]))
+                              for c in live if left[c] and c not in who)
+                    return (add, -sum(left[c] == 1 for c in who), len(ks))
+                g = min(todo, key=score)
+                todo.remove(g)
+                out.append(g)
+                for c in live:
+                    if c in g[0]:
+                        left[c] -= 1
+                    elif left[c]:
+                        need[c] += len(g[1])
+            return out
+
         if len(gs) <= 7:
             candidates: Any = itertools.permutations(gs)
         else:
-            candidates = [gs, sorted(gs, key=lambda g: min(len(spare[c]) for c in g[0]))]
+            candidates = [gs, sorted(gs, key=lambda g: min(len(spare[c]) for c in g[0])), greedy(gs)]
         best = None
         for perm in candidates:
             c_ = group_cost(perm)
