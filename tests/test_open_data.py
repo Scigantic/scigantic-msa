@@ -292,6 +292,14 @@ def test_server_pairs_first_then_only_new_species_from_open():
     assert "1 more by species from open data" in p.message
 
 
+def test_server_pairs_that_repeat_a_row_are_left_out():
+    qa, qb, sa, sb, oa, ob, merged = _pairs_fixture()
+    sa2 = [sa[0], Row("UniRef100_A9", sa[0].seq, "uniref")]
+    sb2 = [sb[0], Row("UniRef100_B9", "MNPQRSTVWE", "uniref")]
+    plan = combine_pairs([qa, qb], merged, [oa, ob], ["A", "B"], server_pairs=[sa2, sb2], add_open=False)
+    assert plan.server_pairs == 1 and "1 more repeat a row" in plan.pairing.message
+
+
 def test_no_open_pairs_when_the_rule_says_no():
     qa, qb, sa, sb, oa, ob, merged = _pairs_fixture()
     plan = combine_pairs([qa, qb], merged, [oa, ob], ["A", "B"], server_pairs=[sa, sb], add_open=False,

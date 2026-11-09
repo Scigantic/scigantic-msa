@@ -300,11 +300,26 @@ def combine_pairs(queries: Sequence[str], merged: Sequence[Sequence[Row]], open_
     msg_parts: List[str] = []
     n_server = 0
     if server_pairs is not None:
-        n_server = len(server_pairs[0]) if server_pairs else 0
-        for c in range(nc):
-            rows[c] = list(server_pairs[c])
+        # A pair whose row in some chain repeats an earlier pair's row (or
+        # the query) is dropped: Boltz and AlphaFold 3 drop repeated rows,
+        # which would leave the other chains' rows of that pair unpaired.
+        seen: List[Set[str]] = [{q} for q in queries]
+        total = len(server_pairs[0]) if server_pairs else 0
+        for k in range(total):
+            picked = [server_pairs[c][k] for c in range(nc)]
+            res = [ungapped(r.seq) if r is not None else None for r in picked]
+            if any(x is not None and x in seen[c] for c, x in enumerate(res)):
+                continue
+            for c in range(nc):
+                rows[c].append(picked[c])
+                x = res[c]
+                if x is not None:
+                    seen[c].add(x)
+        n_server = len(rows[0])
         keys = [f"server:{k + 1}" for k in range(n_server)]
-        msg_parts.append(f"{n_server} rows from the server's paired search")
+        msg_parts.append(f"{n_server} rows from the server's paired search"
+                         + (f" ({total - n_server} more repeat a row of another pair and are left out)"
+                            if total > n_server else ""))
     elif base is not None and base.n_paired:
         n_server = base.n_paired
         rows = [list(r) for r in base.rows]
