@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+import zlib
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -155,7 +156,7 @@ class Alignment:
     def from_bundle(cls, data: bytes, source: str, query: Optional[str] = None) -> "Alignment":
         try:
             text = gzip.decompress(data).decode("utf-8")
-        except (OSError, EOFError, UnicodeDecodeError) as e:
+        except (OSError, EOFError, UnicodeDecodeError, zlib.error) as e:
             raise A3MError(f"stored alignment is not gzip UTF-8 text: {e}") from None
         meta: Dict[str, Any] = {}
         if text.startswith("#scigantic-msa "):

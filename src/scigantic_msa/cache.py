@@ -34,7 +34,7 @@ from typing import IO, TYPE_CHECKING, Callable, List, Optional
 if TYPE_CHECKING:  # pragma: no cover
     from .alignment import Alignment
 
-__all__ = ["cache_dir", "atomic_write", "private_dirs", "FileLock", "AlignmentCache", "BlobCache"]
+__all__ = ["cache_dir", "atomic_write", "private_dirs", "private_file", "FileLock", "AlignmentCache", "BlobCache"]
 
 
 def _absolute_env(name: str) -> Optional[str]:
@@ -58,17 +58,23 @@ def cache_dir() -> Path:
 
 
 def _owner_only(d: Path) -> None:
+    """Remove the group and other bits of ``d``. Only ever tightens: the
+    owner's bits stay as they are, so a folder the user made read only
+    stays read only."""
     try:
-        os.chmod(d, 0o700)
+        mode = os.stat(d).st_mode & 0o7777
+        if mode & 0o077:
+            os.chmod(d, mode & ~0o077)
     except OSError:
         pass  # not ours to change, or a file system without modes
 
 
 def private_dirs(path: Path, base: Path) -> None:
     """Make directory ``path`` and every directory between ``base`` and it,
-    mode 0700, tightening any that exist with looser modes. ``base`` itself
-    is made 0700 only when it is created here: a cache directory the user
-    chose and made keeps the mode they gave it."""
+    mode 0700, and remove the group and other bits of any that exist. Owner
+    bits are never added. ``base`` itself is changed only when it is created
+    here: a cache directory the user chose and made keeps the mode they gave
+    it."""
     if not base.is_dir():
         base.mkdir(parents=True, exist_ok=True, mode=0o700)
         _owner_only(base)
@@ -81,6 +87,15 @@ def private_dirs(path: Path, base: Path) -> None:
             if not d.is_dir():
                 raise
         _owner_only(d)
+
+
+def private_file(path: Path, mode: str = "wb") -> IO[bytes]:
+    """Open ``path`` for writing, created 0600 (or kept at its mode when it
+    exists), for partial files that sit in the cache while they are
+    written."""
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if "a" in mode else os.O_TRUNC)
+    fd = os.open(path, flags | getattr(os, "O_BINARY", 0), 0o600)
+    return os.fdopen(fd, mode)
 
 
 def atomic_write(path: Path, data: bytes, mode: int = 0o644) -> None:
@@ -130,7 +145,9 @@ class FileLock:
         self._make_dir = make_dir
         self._fh: Optional[IO[bytes]] = None
 
-    def acquire(self) -> None:
+    def acquire(self, on_wait: Optional[Callable[[], None]] = None) -> None:
+        """Take the lock, waiting up to ``timeout`` seconds. ``on_wait`` is
+        called once, when the lock is found held by someone else."""
         if self._make_dir is not None:
             self._make_dir()
         else:
@@ -151,6 +168,9 @@ class FileLock:
                 fh.close()
                 continue
             fh.close()
+            if on_wait is not None:
+                on_wait()
+                on_wait = None
             if time.monotonic() > deadline:
                 raise LockTimeout(f"timed out waiting for {self.path}")
             time.sleep(self.poll)
