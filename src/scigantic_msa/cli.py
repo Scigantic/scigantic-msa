@@ -1,13 +1,16 @@
 """scigantic-msa command line.
 
     scigantic-msa run SEQ_OR_FASTA --model boltz --out DIR [--server colabfold|nvidia] [--yes]
+    scigantic-msa run SEQ_OR_FASTA --model boltz --out DIR --open-only
     scigantic-msa convert ALIGNMENT.a3m [MORE.a3m ...] --model af3 --out DIR [--uniprot U.sto ...]
     scigantic-msa cache     (prints the cache directory)
     scigantic-msa version   (or --version)
 
-``run`` sends the sequence to the search server and asks once before it
-does (``--yes`` skips the question). ``convert`` reads alignments you
-already have and sends nothing.
+``run`` merges the published open alignments of the sequence with a search
+on the ColabFold server, and asks once before it sends the sequence there
+(``--yes`` skips the question). ``--open-only`` uses open data alone and
+sends the sequence nowhere. ``convert`` reads alignments you already have
+and sends nothing.
 """
 from __future__ import annotations
 
@@ -268,23 +271,54 @@ def _warn_nucleic(jobs: List[Tuple[str, List[str]]]) -> None:
                       "This tool searches protein databases.", file=sys.stderr)
 
 
+def _n(x: float) -> str:
+    return f"{int(round(x)):,}"
+
+
 def _depths(chains: List[Alignment], quiet: bool, job: Optional[str] = None) -> None:
-    """Say how deep each chain's alignment is, and warn when it is so
-    shallow that the model will in effect run on the sequence alone. In a
-    batch, ``job`` names the job, since -q hides the job lines."""
-    for i, c in enumerate(chains, 1):
-        what = f"chain {i}" if len(chains) > 1 else "sequence"
+    """Say how deep each chain's alignment is, how much of it came from
+    open data, and warn when it is so shallow that the model will in
+    effect run on the sequence alone. In a batch, ``job`` names the job,
+    since -q hides the job lines."""
+    from .writers import entities
+
+    ents = entities(chains)
+    names = _ent_names(ents)
+    for (c, _, _), nm in zip(ents, names):
+        what = f"chain {nm}" if len(ents) > 1 or len(chains) > 1 else "sequence"
         if job:
             what = f"{job}: {what}"
         d = c.depth
+        dep = c.provenance.get("depth") if isinstance(c.provenance.get("depth"), dict) else None
         if not quiet:
-            print(f"{what}: depth {d}", file=sys.stderr)
+            if dep and c.source == "merged":
+                kept = (c.provenance.get("merge") or {}).get("kept_open_rows") or {}
+                by = ", ".join(f"{k} {_n(v)}" for k, v in kept.items())
+                print(f"{what}: {_n(dep['rows'])} rows, about {_n(dep['neff80'])} Neff (80%), {_n(dep['species'])} "
+                      f"species. ColabFold alone: {_n(dep['server_rows'])} rows, about {_n(dep['server_neff80'])} Neff, "
+                      f"{_n(dep['server_species'])} species. Open data added {_n(dep['open_rows'])} rows"
+                      + (f" ({by})" if by else "") + ".", file=sys.stderr)
+            elif dep and c.source == "open":
+                kept = (c.provenance.get("merge") or {}).get("kept_open_rows") or {}
+                by = ", ".join(f"{k} {_n(v)}" for k, v in kept.items())
+                print(f"{what}: {_n(dep['rows'])} rows from open data" + (f" ({by})" if by else "")
+                      + f", about {_n(dep['neff80'])} Neff (80%), {_n(dep['species'])} species", file=sys.stderr)
+            else:
+                print(f"{what}: depth {d}", file=sys.stderr)
         if d <= 1:
+            hint = (" No open alignment holds this sequence; run without --open-only to search it."
+                    if c.source == "open" else "")
             print(f"warning: {what} has depth 1 (the query only). The model will run in single-sequence "
-                  "mode, which is usually much less accurate.", file=sys.stderr)
+                  f"mode, which is usually much less accurate.{hint}", file=sys.stderr)
         elif d < LOW_DEPTH:
             print(f"warning: {what} has only {d} sequences in its alignment. Predictions from a shallow "
                   "MSA are often poor.", file=sys.stderr)
+
+
+def _ent_names(ents) -> List[str]:
+    from .adapters import chain_id
+
+    return [", ".join(chain_id(i) for i in idx) for _, _, idx in ents]
 
 
 def _report(files: List[str], nxt: str, quiet: bool) -> None:
@@ -295,7 +329,8 @@ def _report(files: List[str], nxt: str, quiet: bool) -> None:
     print(f"next: {nxt}", file=sys.stderr)
 
 
-def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple[str, List[str]]]] = None) -> Optional[int]:
+def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple[str, List[str]]]] = None,
+             pairs: int = 0) -> Optional[int]:
     """None to go ahead, or an exit code."""
     n = len(pending)
     if n > 10:
@@ -307,9 +342,15 @@ def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple
         print(f"Batch of {len(jobs)} separate jobs.", file=sys.stderr)
     elif jobs and len(jobs[0][1]) > 1:
         print(f"One complex of {len(jobs[0][1])} chains.", file=sys.stderr)
-    print(f"This sends {n} sequence{'s' if n > 1 else ''} (length {lengths}) to {tool.describe_server()}.",
-          file=sys.stderr)
-    if n > 1 and tool.server == "colabfold" and _is_default_host(tool.backend):
+    if n:
+        print(f"This sends {n} sequence{'s' if n > 1 else ''} (length {lengths}) to {tool.describe_server()}.",
+              file=sys.stderr)
+    if pairs:
+        print(f"It also sends {'the chains of the complex' if pairs == 1 else f'the chains of {pairs} complexes'} "
+              f"together for {tool.server_name}'s paired search, as colabfold_batch does "
+              f"({pairs} more job{'s' if pairs > 1 else ''}).", file=sys.stderr)
+    if n + pairs > 1 and tool.server == "colabfold" and _is_default_host(tool.backend):
+        n = n + pairs
         print(f"The public server takes about one new job per minute, so this can take {n} minutes or more "
               "(less for sequences the server has already searched).", file=sys.stderr)
     if yes:
@@ -354,30 +395,44 @@ def cmd_run(a: argparse.Namespace) -> int:
         if len(refused) == len(jobs):
             return die(f"{a.model} cannot read any job of the batch, so nothing was sent.")
         jobs = [j for j in jobs if j[0] not in refused]
+    if a.open_only and a.no_open:
+        return die("--open-only and --no-open leave nothing to search; pass one of them")
+    if a.open_only and (a.host or a.server != "colabfold"):
+        return die("--open-only sends the sequence to no server, so --host and --server do not apply")
     try:
-        tool = MSA(a.server, host=a.host, cache=not a.no_cache, quiet=a.quiet)
+        tool = MSA(None if a.open_only else a.server, host=a.host, cache=not a.no_cache, quiet=a.quiet,
+                   open_data=not a.no_open, openproteinset=a.openproteinset, near=a.near, open_pairs=a.open_pairs)
     except ValueError as e:
         return die(str(e))
-    pending = [q for q in dict.fromkeys(c for _, cs in jobs for c in cs) if tool.cached(q) is None]
-    if pending and remote_disabled():
+    if not a.quiet and tool.open is not None:
+        print(f"Also uses {tool.describe_open()}.", file=sys.stderr)
+    if a.open_only:
+        if not a.quiet:
+            print("--open-only: the sequence is not sent to any search server.", file=sys.stderr)
+        pending: List[str] = []
+        pairs = 0
+    else:
+        pending = [q for q in dict.fromkeys(c for _, cs in jobs for c in cs) if tool.cached(q) is None]
+        pairs = sum(1 for _, cs in jobs if tool.pair_pending(cs))
+    if (pending or pairs) and remote_disabled():
         return die("remote search is disabled (SCIGANTIC_MSA_NO_REMOTE is set), so nothing was sent. "
                    "Use 'scigantic-msa convert' with an alignment you already have.")
-    if len(pending) > MAX_PUBLIC_SEARCHES and tool.server == "colabfold" and _is_default_host(tool.backend):
-        return die(f"this would send {len(pending)} new sequences to the public ColabFold server; one run sends "
+    if len(pending) + pairs > MAX_PUBLIC_SEARCHES and tool.server == "colabfold" and _is_default_host(tool.backend):
+        return die(f"this would send {len(pending) + pairs} new jobs to the public ColabFold server; one run sends "
                    f"at most {MAX_PUBLIC_SEARCHES}. Nothing was sent. Split the input into smaller runs, or use "
                    "your own server with --host.")
     check = getattr(tool.backend, "check_ready", None)
-    if pending and check is not None:
+    if (pending or pairs) and check is not None:
         try:
             check()
         except RemoteError as e:
             return die(f"{e}. Nothing was sent.")
-    if pending:
-        rc = _confirm(tool, pending, a.yes, jobs)
+    if pending or pairs:
+        rc = _confirm(tool, pending, a.yes, jobs, pairs)
         if rc is not None:
             return rc
-    elif not a.quiet:
-        print("Every chain is in the local cache; nothing is sent.", file=sys.stderr)
+    elif not a.quiet and not a.open_only:
+        print("Every chain is in the local cache; nothing is sent to the search server.", file=sys.stderr)
     out = Path(a.out)
     failed: List[str] = []
     total = len(jobs) + len(refused)
@@ -386,7 +441,7 @@ def cmd_run(a: argparse.Namespace) -> int:
             if a.batch and not a.quiet:
                 print(f"scigantic-msa: job {k} of {len(jobs)}: {name}", file=sys.stderr)
             try:
-                got = tool.get(chains, remote=True)
+                got = tool.get(chains, remote=tool.backend is not None)
                 files, nxt = write_model(a.model, got, out / name if a.batch else out, name, a.quiet)
             except (JobFailed, A3MError, PrepareError) as e:
                 # Only this job's sequence or result is at fault, so the rest
@@ -452,6 +507,35 @@ def cmd_cache(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sources(a: argparse.Namespace) -> int:
+    """The open data sets, and which of their tables this cache holds."""
+    from .opendata.lookup import OpenData
+    from .opendata.sources import SOURCES, UPSTREAM
+    from .opendata.tables import SIZES_MB
+
+    od = OpenData(cache_dir(), openproteinset=a.openproteinset, say=lambda m: print(f"scigantic-msa: {m}", file=sys.stderr))
+    for sid, s in SOURCES.items():
+        print(f"{sid}: {s['title']}, {s['license']}{'' if s['default'] else ' (opt in)'}")
+        print(f"  {s['where']}")
+        print(f"  searched: {s['databases']}")
+    for tid in SIZES_MB:
+        if a.fetch and (tid != "openproteinset" or a.openproteinset):
+            try:
+                od.tables.ensure(tid)
+            except Exception as e:  # noqa: BLE001 - say it and go on with the next table
+                print(f"error: {tid}: {e}", file=sys.stderr)
+        t = od.tables.info(tid)
+        if t is None:
+            print(f"table {tid}: not downloaded (about {SIZES_MB[tid]} MB)")
+        else:
+            f = t.files[0] if t.files else {}
+            print(f"table {tid}: {t.entries:,} sequences, built {t.built_at}, ETag {f.get('etag')}")
+    print("Terms of the searched databases:")
+    for k, v in UPSTREAM.items():
+        print(f"  {k}: {v['terms']}{'' if v['checked'] else ' (not confirmed)'}")
+    return 0
+
+
 def cmd_version(a: argparse.Namespace) -> int:
     print(f"scigantic-msa {__version__}")
     return 0
@@ -464,13 +548,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"scigantic-msa {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    r = sub.add_parser("run", help="search a server for the MSA, then write the model's input")
+    r = sub.add_parser("run", help="build the MSA from open data and a server search, then write the model's input")
     r.add_argument("sequence", help="a FASTA file, - for stdin, or a sequence (start it with '=' and quote it, "
                                     "as in '=MKVLAAG', if it is shorter than 10 residues); ':' separates chains of a complex")
     r.add_argument("--model", "-m", choices=MODELS, required=True)
     r.add_argument("--out", "-o", required=True, help="output directory")
     r.add_argument("--server", choices=BACKENDS, default="colabfold", help="where the sequence is sent (default colabfold)")
     r.add_argument("--host", help="URL of another server of that kind, for example your own ColabFold server")
+    r.add_argument("--open-only", action="store_true",
+                   help="use only published open alignments; the sequence is sent to no search server "
+                        "(only its MD5 goes to UniProt). For unpublished sequences")
+    r.add_argument("--no-open", action="store_true", help="use the search server alone, without open data")
+    r.add_argument("--openproteinset", action="store_true",
+                   help="also use OpenProteinSet's PDB alignments (about 610 MB of tables the first time)")
+    r.add_argument("--near", action="store_true",
+                   help="also use open entries at 95%% identity or more over 90%% of the query (needs mmseqs on PATH)")
+    r.add_argument("--open-pairs", choices=("auto", "always", "never"), default="auto",
+                   help="for a complex, when to add pairs by species from open data to the server's pairs: auto "
+                        "(default: only when the chains share an organism), always or never")
     g = r.add_mutually_exclusive_group()
     g.add_argument("--complex", action="store_true",
                    help=f"a FASTA with several records is one complex, one chain per record (at most {MAX_CHAINS})")
@@ -498,6 +593,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("cache", help="print the local cache directory (delete it to forget every result)"
                    ).set_defaults(func=cmd_cache)
+    o = sub.add_parser("sources", help="list the open data sets, their licences and the tables in the cache")
+    o.add_argument("--fetch", action="store_true", help="download (or refresh) the tables now")
+    o.add_argument("--openproteinset", action="store_true", help="with --fetch, also the OpenProteinSet tables")
+    o.set_defaults(func=cmd_sources)
     sub.add_parser("version", help="print the version").set_defaults(func=cmd_version)
     return p
 

@@ -12,12 +12,13 @@ import threading
 from typing import Any, Optional, Set
 
 from ..http import remote_disabled
-from .colabfold import DEFAULT_HOST, ColabFoldClient, JobFailed, RateLimited, RemoteError, RemoteResult, public_host
+from .colabfold import (DEFAULT_HOST, ColabFoldClient, JobFailed, PairResult, RateLimited, RemoteError, RemoteResult,
+                        public_host, replay_dir)
 from .nvidia import NvidiaClient
 
 __all__ = [
     "ColabFoldClient", "NvidiaClient", "RemoteError", "RateLimited", "JobFailed", "RemoteResult",
-    "make_backend", "announce", "remote_disabled", "BACKENDS",
+    "make_backend", "announce", "remote_disabled", "BACKENDS", "PairResult",
 ]
 
 BACKENDS = ("colabfold", "nvidia")
@@ -41,6 +42,10 @@ def announce(backend: Any, stream: Optional[Any] = None) -> None:
         if key in _announced:
             return
         _announced.add(key)
+    if backend.name == "colabfold" and replay_dir():
+        print(f"scigantic-msa: reading saved ColabFold results from {replay_dir()} (test only); nothing is sent.",
+              file=stream or sys.stderr, flush=True)
+        return
     msg = f"scigantic-msa: sending the sequence to {backend.server_name} ({backend.name} backend)."
     if backend.name == "colabfold" and public_host(str(getattr(backend, "host", DEFAULT_HOST))):
         msg += " Results on that public server can be read by anyone who knows the sequence."

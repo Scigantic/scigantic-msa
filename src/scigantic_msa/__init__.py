@@ -1,14 +1,16 @@
 """scigantic-msa: one command from a protein sequence to the MSA input files
-a structure predictor reads.
+a structure predictor reads, built from a ColabFold search merged with
+published open alignments.
 
     from scigantic_msa import MSA
     from scigantic_msa.adapters import AlphaFold3, Boltz
 
-    result = MSA().get(sequence, remote=True)   # sends the sequence to api.colabfold.com
+    result = MSA().get(sequence, remote=True)   # sends the sequence to api.colabfold.com, plus open data
+    private = MSA(server=None).get(sequence)    # open data only
     af3_input = AlphaFold3.prepare(result)      # dict ready for json.dump
 """
 
-__version__ = "0.2.9"
+__version__ = "0.3.0"
 
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256  # noqa: E402
 from .a3m import A3MError, Row, parse_a3m, parse_stockholm  # noqa: E402

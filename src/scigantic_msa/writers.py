@@ -41,7 +41,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .a3m import Row, format_a3m, ungapped
 from .alignment import Alignment, dedupe_rows
-from .pairing import Pairing, pair_by_species
+from .pairing import Pairing, pairing_for
 from .seqkey import canonical_sequence
 
 __all__ = [
@@ -113,14 +113,18 @@ def entities(chains: Sequence[Alignment]) -> List[Tuple[Alignment, int, List[int
 def _pairing(ents: Sequence[Alignment], pairing: Optional[Pairing]) -> Pairing:
     if pairing is not None:
         return pairing
-    return pair_by_species(ents)
+    return pairing_for(ents)
 
 
 #: The provenance keys the attribution file keeps: where the alignment came
 #: from and when, nothing local. The job ticket (enough to download the
 #: result from a public server) and any cache path stay out of it.
 SIDECAR_PROVENANCE = ("from", "backend", "server", "mode", "databases", "computed_at", "experimental",
-                      "file", "uniprot_file")
+                      "file", "uniprot_file", "open", "merge", "organisms", "depth", "pairing")
+#: Folder, next to the attribution file, of one table per chain that says
+#: where every row came from.
+ROWS_DIR = "scigantic-msa-rows"
+ROWS_COLUMNS = ("row", "id", "source", "role", "entry", "object", "record", "anchor", "licence", "also_in")
 
 
 def _public_provenance(prov: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,6 +139,10 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
     entry replaces an older one only when it rewrote every file the older
     one named; otherwise both stay, so no source is ever dropped while one
     of its files is still there. ``sources`` lists every distinct credit."""
+    files = dict(files)
+    tables = _row_tables(directory, chains)
+    if tables:
+        files["row_provenance"] = tables
     entry = {
         "chains": [
             {
@@ -173,6 +181,48 @@ def _sidecar(directory: Path, chains: Sequence[Alignment], notes: List[str], fil
         _atomic_write(path, json.dumps(data, indent=1, sort_keys=True) + "\n")
     finally:
         lock.release()
+
+
+def _row_tables(directory: Path, chains: Sequence[Alignment]) -> Dict[str, str]:
+    """Write, for each distinct chain whose rows say where they came from,
+    a TSV with one line per row (the alignment's rows, then the rows only
+    in its paired rows). Named for its content. Returns {seq_sha256: path
+    relative to directory}."""
+    from .opendata.sources import COLABFOLD, SOURCES
+
+    out: Dict[str, str] = {}
+    for m in {m.query: m for m in chains}.values():
+        if not any("prov" in r.extra for r in m.rows[1:]):
+            continue
+        lines = ["\t".join(ROWS_COLUMNS)]
+
+        def line(label: str, r: Row) -> str:
+            p = r.extra.get("prov")
+            rid = r.header.split(None, 1)[0].split("\t", 1)[0] if r.header.strip() else ""
+            if p is None:
+                cells = [label, rid, "", r.db, "", "", "", "", "", ""]
+            else:
+                lic = SOURCES.get(p.source, {}).get("license") or (COLABFOLD["license"] if p.source == "colabfold" else "")
+                url = p.url if p.source not in ("colabfold", "nvidia") else ""
+                entry = p.entry if p.source not in ("colabfold", "nvidia") else ""
+                cells = [label, rid, p.source, p.role, entry, url, str(p.record), p.anchor, lic,
+                         ",".join(sorted(r.extra.get("also", ())))]
+            return "\t".join(c.replace("\t", " ") for c in cells)
+
+        for i, r in enumerate(m.rows[1:], 1):
+            lines.append(line(str(i), r))
+        cp = m.complex_pairing
+        if cp is not None and m.query in cp.queries:
+            ci = cp.queries.index(m.query)
+            inside = {id(r) for r in m.rows}
+            for k, r in enumerate(cp.pairing.rows[ci], 1):
+                if r is not None and id(r) not in inside:
+                    lines.append(line(f"pair{k}", r))
+        text = "\n".join(lines) + "\n"
+        rel = f"{ROWS_DIR}/{m.seq_sha256}.{_tag(text)}.tsv"
+        _atomic_write(directory / rel, text)
+        out[m.seq_sha256] = rel
+    return out
 
 
 def _list(v: Any) -> List[Any]:

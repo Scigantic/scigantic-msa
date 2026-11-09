@@ -13,8 +13,9 @@ from .seqkey import canonical_sequence, seq_sha256
 __all__ = ["Alignment", "SOURCES", "classify_header", "species_key"]
 
 #: Where a result came from: a search server just now, this machine's cache
-#: of an earlier search, or an alignment file you passed in.
-SOURCES = ("remote", "cache", "file")
+#: of an earlier search, an alignment file you passed in, a server search
+#: merged with open data, or open data alone.
+SOURCES = ("remote", "cache", "file", "merged", "open")
 
 _TAXID = re.compile(r"(?:\bTaxID=|\bOX=)(\d+)")
 _UNIREF_N = re.compile(r"\bn=(\d+)\b")
@@ -68,6 +69,10 @@ class Alignment:
     templates: Optional[Dict[str, Any]] = None
     #: Local cache file this result was written to, if any.
     cache_path: Optional[str] = field(default=None, repr=False, compare=False)
+    #: For a chain of a complex from ``MSA().get([...])``: the pairs made
+    #: for that complex (a :class:`scigantic_msa.pairing.ComplexPairing`),
+    #: which every writer uses instead of pairing by species itself.
+    complex_pairing: Any = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.query = canonical_sequence(self.query)

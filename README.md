@@ -1,12 +1,21 @@
 # scigantic-msa
 
-Get a multiple sequence alignment (MSA) for a protein sequence once, and
-write the input files for the structure predictor you are about to run:
+Build a multiple sequence alignment (MSA) for a protein sequence, and write
+the input files for the structure predictor you are about to run:
 AlphaFold 3, Boltz, Chai-1, ColabFold, OpenFold3 or Protenix.
 
-The alignment comes from the ColabFold MMseqs2 server (or NVIDIA's MSA
-Search, if you have a key), or from an A3M file you already have. There is
-no account and no login, and nothing is stored on our side.
+Each MSA is the ColabFold MMseqs2 server's search merged with the
+alignments that others have already computed and published as open data:
+the OpenFold3 training MSAs, LiteFold's human proteome MSAs and, if you
+ask, OpenProteinSet. These are read where their publishers put them; there
+is no index or mirror of ours in between. Every row keeps a record of
+where it came from. For a complex, the server's own paired search is kept
+and pairs by species from open data are added when the chains share an
+organism.
+
+With `--open-only` the sequence is not sent to any search server, which is
+the mode for unpublished sequences. There is no account and no login, and
+nothing is stored on our side.
 
 ## Install
 
@@ -28,49 +37,65 @@ Your sequence may be unpublished, so read this before you run a search.
   api.colabfold.com by default. The public ColabFold server needs no login
   to read a result, and the job id is a hash of the sequence, so anyone who
   knows the sequence can download the result. Treat a submission there as
-  publishing the sequence.
-- The Python API refuses to send anything unless you pass `remote=True`.
-  Constructing a client yourself (`ColabFoldClient(...).search(seq)`, or
+  publishing the sequence. For a complex, the chains are also sent together
+  once more, for the server's paired search.
+- The open data lookup sends no sequence. Each set's table of sequences is
+  downloaded once and the sequence is looked up on your machine. The MD5 of
+  the sequence (UniProt's own sequence checksum) is sent to
+  rest.uniprot.org to find which UniProt entries, and so which organisms,
+  have exactly this sequence. If a table holds the sequence, the public
+  files of that entry are then read from their publisher, which tells the
+  publisher which public entry you matched, and UniProt accessions of the
+  sequence are tried as OpenProteinSet UniClust30 entries.
+- `--open-only` (`MSA(server=None)` in Python) does the open data lookup and
+  nothing else: no search server receives the sequence, and there is
+  nothing to confirm. The command line says what was sent where.
+- The Python API refuses to send anything to a search server unless you
+  pass `remote=True`. Constructing a client yourself (`ColabFoldClient(...).search(seq)`, or
   `NvidiaClient`) is that same choice made in code, so it sends without
   `remote=True`; it does not use the cache or say where it sends. The
   command line says which server will receive the sequence and asks once; `--yes` skips the question for scripts. Without a terminal and
   without `--yes`, it stops and sends nothing.
 - `convert` and `MSA().from_a3m()` make no network connection at all.
-- The only network traffic is to the server you chose. The tool never
-  contacts a Scigantic server.
+- The tool never contacts a Scigantic server.
 - The sequence is never written to a log. Results are kept in a local cache
   so the same sequence is not submitted twice: `SCIGANTIC_MSA_CACHE` if set,
   else `$XDG_CACHE_HOME/scigantic-msa` if `XDG_CACHE_HOME` is an absolute
   path (a relative one is ignored, as the XDG spec says), else
   `~/.cache/scigantic-msa` (on Windows, `%LOCALAPPDATA%\scigantic-msa\cache`,
   when `LOCALAPPDATA` is absolute). `scigantic-msa cache` prints the one in
-  use. Delete it to forget them, or pass `--no-cache`. Only you can read its
+  use. Delete it to forget them, or pass `--no-cache` (open data then goes
+  to a temporary folder removed at exit). Only you can read its
   files or list its folders, which are named by a hash of the sequence; a
   cache made by 0.2.7 or older is made so the first time it is used, even
   only to read it. If the cache
   directory cannot be written (read-only home, say), the tool warns once
   and runs without it.
-- `SCIGANTIC_MSA_NO_REMOTE=1` blocks every search, whatever the code asks,
-  including a client used directly: every request to a server checks it,
-  and so does every retry. Any value but `0`, `false`, `no` or `off`
+- `SCIGANTIC_MSA_NO_REMOTE=1` blocks all network traffic, whatever the code
+  asks, including a client used directly and the open data lookups: every
+  request checks it, and so does every retry. Any value but `0`, `false`, `no` or `off`
   counts, including one of only spaces; an empty value
-  (`SCIGANTIC_MSA_NO_REMOTE=`) is the same as not setting it. Results
-  already in the cache are still used, since they send nothing.
+  (`SCIGANTIC_MSA_NO_REMOTE=`) is the same as not setting it. Results,
+  tables and open files already in the cache are still used, since they
+  send nothing.
 
 The public ColabFold server is a shared resource with a rate limit of about
 one new job per minute per IP address. This client backs off, honours
 Retry-After, resumes a job from its id instead of submitting it again, and
-gives up after a bounded wait. One `run` sends at most 100 new sequences
-to it; split larger inputs into several runs. To use your own server, pass
+gives up after a bounded wait. One `run` sends at most 100 new jobs
+(sequences and paired searches) to it; split larger inputs into several runs. To use your own server, pass
 `--host URL` (or `MSA(host=URL)`).
 
 ## Command line
 
 ```
 scigantic-msa run SEQ_OR_FASTA --model boltz --out job/
+scigantic-msa run SEQ_OR_FASTA --model boltz --out job/ --open-only
 scigantic-msa run chains.fasta --complex --model af3 --out job/ --yes
 scigantic-msa run many.fasta --batch --model boltz --out jobs/
 scigantic-msa convert my_alignment.a3m --model protenix --out job/
+scigantic-msa sources      # the open data sets, their terms, and the tables in the cache
+scigantic-msa sources --fetch   # download the tables now (67 MB)
 scigantic-msa cache        # prints the cache directory
 scigantic-msa --version
 ```
@@ -102,11 +127,25 @@ with several records needs one of:
   `jobs/run1_rec1/boltz/`. A job the server cannot do does not stop the
   others; the command ends with an error naming the failed jobs.
 
+Options for the open data part of `run`:
+
+- `--open-only`: open data alone; the sequence goes to no search server.
+- `--no-open`: the server's result alone, as in 0.2.
+- `--openproteinset`: also OpenProteinSet's PDB alignments (2021 searches
+  of BFD, UniClust30, UniRef90 and MGnify). Its tables are about 610 MB the
+  first time, so it is off by default.
+- `--near`: also entries at 95% identity or more over 90% of the query,
+  such as another construct of the same protein. Needs an `mmseqs` binary
+  on PATH; the search runs on your machine.
+- `--open-pairs auto|always|never`: see Complexes.
+
 Before sending, `run` says how many sequences go to which server, and for
-a complex or batch, how many chains or jobs. After writing, `run` and
-`convert` print the depth of each chain's alignment, and warn when it is
-shallow or holds only the query, which makes the model run in
-single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
+a complex or batch, how many chains or jobs, and what the open data lookup
+sends. After writing, `run` and `convert` print the depth of each chain's
+alignment: rows, an estimated Neff at 80% identity and species, for the
+merged MSA and for the server's result alone, and how many rows each open
+set added. They warn when it is shallow or holds only the query, which
+makes the model run in single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
 
 `--host` takes an `http://` or `https://` URL in ASCII with no spaces,
@@ -146,6 +185,21 @@ directly: the adapters do not share a signature.
 | `ColabFold` | **required** | yes | `Path` |
 | `OpenFold3` | **required** | yes | `dict` |
 | `Protenix` | **required** | yes | `list[dict]` |
+
+### Open data from Python
+
+```python
+from scigantic_msa import MSA
+
+merged = MSA().get(sequence, remote=True)          # ColabFold + open data
+private = MSA(server=None).get(sequence)           # open data only, nothing sent to a search server
+a, b = MSA().get([seq_a, seq_b], remote=True)      # a complex: both chains carry its pairs
+print(merged.provenance["depth"], merged.provenance["merge"])
+```
+
+`MSA(open_data=False)` gives the server's result alone. `openproteinset`,
+`near` and `open_pairs` match the command line options. Each row has
+`row.extra["prov"]`, a `Prov(source, role, entry, url, record, anchor)`.
 
 ### Adapters directly
 
@@ -207,6 +261,61 @@ result = MSA().from_a3m("my_alignment.a3m", sequence=sequence)
 result = MSA().from_a3m("chainA.a3m", uniprot="chainA_uniprot_hits.sto")  # for pairing
 ```
 
+## Open data
+
+| set | where it is read | licence | searched |
+| --- | --- | --- | --- |
+| OpenFold3 training MSAs (`openfold3`) | `s3://openfold3-data/msas/pdb_msas_completed/` | CC BY 4.0 | UniProtKB, UniRef90, MGnify (jackhmmer); UniRef30 + ColabFold envdb; 2025 releases |
+| LiteFold human proteome (`litefold`) | huggingface.co/datasets/LiteFold/human-proteome-wide-msa, one pinned commit | CC BY 4.0 (dataset card) | UniRef30 2302 + ColabFold envdb (MMseqs2) |
+| OpenProteinSet PDB (`openproteinset`, opt in) | `s3://openfold/alignment_db/` | CC BY 4.0 | UniRef90, MGnify, BFD + UniClust30; 2021 |
+| OpenProteinSet UniClust30 (`uniclust30`) | `s3://openfold/uniclust30/` | CC BY 4.0 | UniClust30 |
+
+How an entry is found, with no index of ours:
+
+- OpenFold3: `msas/pdb_msas_completed_representives.fasta` (55 MB) gives the
+  sequence of every MSA directory. Only representative chains have a
+  directory, so the lookup is by sequence, not by PDB chain id.
+- LiteFold: `manifest.tsv` (12 MB) gives the sequence of every protein.
+- OpenProteinSet: `data_caches/chain_data_cache.json` (256 MB) and
+  `alignment_db/alignment_db.index` (352 MB); files are read by byte range.
+- UniClust30: UniParc is asked by MD5 for the sequence's UniProtKB
+  accessions, and up to 25 of them are tried as entries.
+
+Each table is downloaded once into the cache, with its URL, ETag, size and
+sha256 recorded, and kept as a small SQLite table keyed by the sha256 of
+the sequence. Its ETag is checked at most once a day
+(`SCIGANTIC_MSA_OPEN_REFRESH_HOURS`) and a changed table is downloaded
+again. The table versions used are named in the attribution file. Files of
+matched entries are kept in the cache as parsed rows. A file is read until
+its 50,000th row or 256 MB, whichever comes first (OpenFold3's
+`uniprot_hits.sto` files reach 2.9 GB); their rows are ordered best hit
+first, so a cut drops the weakest hits. A file whose first row is not the
+sequence is refused; a single broken row is dropped and counted.
+
+Merging, for each chain:
+
+1. A row with the query's residues is dropped.
+2. Rows with the same residues (gaps removed) are kept once, the
+   ColabFold copy first.
+3. Rows of the same entry (accession) over the same part of it are kept
+   once: the one with the most aligned residues. "The same part" means the
+   entry spans the rows state (`/12-200` in Stockholm names, the target
+   start and end in ColabFold headers) overlap by at least half of the
+   shorter, or, when a row states no span, its span on the query. Rows of
+   one entry over different parts of it, such as repeats, all stay.
+   Deduplicating by exact strings alone kept such copies and raised Neff
+   by up to 38% on the targets this was measured on.
+4. The ColabFold rows come first, in the server's order, then the open
+   rows, one from each open file in turn. A model that reads only the
+   first N rows (Boltz reads 8,192 by default, AlphaFold 3 16,384) sees the
+   whole server result first, so open rows count most where the server
+   found few.
+
+Open data only has what was published: PDB chains (OpenFold3 to 2025,
+OpenProteinSet to 2021), the human proteome and UniClust30
+representatives. A sequence in none of them gets nothing from open data,
+and `--open-only` then gives the query alone.
+
 ## Checks
 
 - An A3M is checked strictly: the first record must be the query (no gaps,
@@ -225,6 +334,27 @@ result = MSA().from_a3m("chainA.a3m", uniprot="chainA_uniprot_hits.sto")  # for 
   the Protenix adapter refuses them before writing anything.
 
 ## Complexes
+
+With the ColabFold server, a complex gets the server's own paired search
+(`/ticket/pair` with greedy pairing, as `colabfold_batch` sends for a
+heteromer), and those pairs come first. Then pairs by species from the
+open rows are added, for species and entries the server's pairs do not
+already have, but only when the chains come from the same organism: every
+chain's organism must be known (from the UniProt entries that have exactly
+its sequence, OpenFold3 UniProt hits that are copies of it, or LiteFold for
+human proteins) and some species must have all of them. For chains from
+different organisms, such as a virus protein and its human receptor, pairs
+by species are not coevolved partners and are left out; for chains of
+unknown organism they are left out too. `--open-pairs always` adds them
+anyway and `--open-pairs never` never does. The tool says which applied.
+Every writer then uses exactly these pairs. On 15 benchmark heterodimers
+the server's paired search found more pairs than the open rows on large
+families from one organism, and the open rows added species the server did
+not pair; for one human and snake toxin complex the open rows alone would
+have made 112 pairs where the server made 6.
+
+Without a paired search (`--server nvidia`, or when it fails), the rows
+are paired by species as follows.
 
 Each chain gets its own unpaired MSA. Rows are paired across chains only
 where the rows say the species: an NCBI taxid (from ColabFold's taxonomy
@@ -268,7 +398,7 @@ are `<sha256>/<hash>/`, and AlphaFold 3 files with `inline=False` are
 | Chai-1 | `pairing_key` column |
 | ColabFold | the complex A3M layout, paired rows first |
 | OpenFold3 | `colabfold_paired.a3m` per chain |
-| Protenix | `pairing.a3m` per chain, with the taxid (or UniProt species code) in each header so Protenix pairs on the same species |
+| Protenix | `pairing.a3m` per chain, with the taxid (or UniProt species code) in each header so Protenix pairs on the same species; for the pairs of `run`, each pair's number stands in for the species so Protenix pairs exactly those rows |
 
 ColabFold server results carry taxids but no UniProt rows. If you have a
 UniProt alignment for every chain (`convert --uniprot`, or
@@ -291,24 +421,39 @@ featurisation, up to the features and without model weights.
 
 ## Data sources and attribution
 
-The alignments come from the server you chose, under its terms:
+The alignments come from:
 
-- ColabFold MMseqs2 server, run by the ColabFold team. Cite Mirdita et al.,
-  ColabFold: making protein folding accessible to all, Nature Methods 19,
-  679-682 (2022), and the databases it searches (UniRef30 and the ColabFold
-  environmental database).
+- ColabFold MMseqs2 server, run by the ColabFold team, under its terms.
+  Cite Mirdita et al., ColabFold: making protein folding accessible to
+  all, Nature Methods 19, 679-682 (2022), and the databases it searches
+  (UniRef30 and the ColabFold environmental database, CC BY 4.0).
 - NVIDIA MSA Search (experimental here), under NVIDIA's API trial terms.
+- The open data sets above, each CC BY 4.0: credit the publisher as the
+  attribution file says. The rows were searched against UniProt (CC BY
+  4.0), the ColabFold databases and BFD (CC BY 4.0) and MGnify (CC0).
+  UniClust30's terms were not confirmed; the Uniclust authors are reported
+  to publish it as CC BY-SA 4.0, which would make alignments with its rows
+  share-alike. Rows from OpenProteinSet's `bfd_uniclust` files and from
+  UniClust30 entries are flagged in the attribution file for that reason.
+- UniProt UniParc (CC BY 4.0), for the organisms of a sequence.
 
 Every adapter that writes files also writes `scigantic-msa-attribution.json`
-next to them, with the server, mode, date and the terms to credit. For each
-chain it also holds its length, depth, `seq_sha256` (the files next to it
-are named with it too), whether the alignment came from the server, the
-cache or a file (by name, without its folder), and the names of the files
-written. It holds no local path and no server job id. When
-several jobs, models or runs write into one folder, the file keeps one
-entry per write under `outputs`, and `sources` lists every distinct credit.
-A write replaces an older entry only when it rewrote all of that entry's
-files.
+next to them. `sources` lists every distinct credit: each server and open
+set used, with its licence, citation and, for an open set, the version of
+its table (URL, ETag, Last-Modified, size and sha256 of each file). For
+each chain it holds its length, depth, `seq_sha256` (the files next to it
+are named with it too), where the alignment came from, the open entries
+and files read (with their ETags and row counts, and any error), how many
+rows each source kept after the merge and why others were dropped, the
+organisms found, the depth summary, and for a complex the number of server
+and open pairs and the rule that applied. It holds no local path and no
+server job id. Next to it, `scigantic-msa-rows/<seq_sha256>.<hash>.tsv`
+gives one line per row of each chain: its id, source, file kind, entry,
+the URL of the file and the row's position in it, its licence and which
+other sources had the same row. When several jobs, models or runs write
+into one folder, the attribution file keeps one entry per write under
+`outputs`. A write replaces an older entry only when it rewrote all of
+that entry's files.
 
 ## Settings
 
@@ -320,6 +465,8 @@ files.
 | `SCIGANTIC_MSA_NVIDIA_URL` | another NVIDIA MSA Search endpoint |
 | `SCIGANTIC_MSA_CONTACT` | text added to the User-Agent sent to the server, such as an email address (one line, Latin-1; `run` stops before sending otherwise) |
 | `NVIDIA_API_KEY` | key for `--server nvidia` |
+| `SCIGANTIC_MSA_OPEN_REFRESH_HOURS` | how often a table's ETag is checked (default 24) |
+| `SCIGANTIC_MSA_TEST_COLABFOLD_REPLAY` | test only: a folder of saved ColabFold results named `<job id>.tar.gz`, read instead of the server, which is then never contacted |
 
 ## Development
 
@@ -330,7 +477,7 @@ pytest
 
 The tests run offline against small real alignment files in
 `tests/fixtures/real` and a local HTTP server standing in for the ColabFold
-and NVIDIA APIs. `tests/test_predictors.py` loads the output with Boltz's
+and NVIDIA APIs and the open data hosts. `tests/test_predictors.py` loads the output with Boltz's
 and Chai-1's own parsers when interpreters with those packages are given;
 see the file for how.
 

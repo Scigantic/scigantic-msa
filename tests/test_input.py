@@ -190,7 +190,7 @@ def test_convert_shallow_and_deep(tmp_path, capsys):
 def test_run_reports_depth_per_chain(fake, tmp_path, capsys):
     assert run(f"{Q}:{Q2}", "-m", "af3", "-o", str(tmp_path / "o"), "--yes") == 0
     err = capsys.readouterr().err
-    assert "chain 1: depth 1" in err and "chain 2: depth 1" in err
+    assert "chain A: depth 1" in err and "chain B: depth 1" in err
 
 
 # Item 12: DNA warning, Ctrl-C hint.

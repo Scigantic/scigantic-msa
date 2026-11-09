@@ -40,7 +40,7 @@ from ..a3m import A3MError, Row, parse_a3m
 from ..seqkey import canonical_sequence
 
 __all__ = ["ColabFoldClient", "RemoteError", "RateLimited", "JobFailed", "RemoteResult", "ticket_id", "DEFAULT_HOST",
-           "public_host"]
+           "public_host", "PairResult", "parse_pair_result", "REPLAY_ENV"]
 
 DEFAULT_HOST = "https://api.colabfold.com"
 ENV_A3M = "bfd.mgnify30.metaeuk30.smag30.a3m"
@@ -218,6 +218,9 @@ class ColabFoldClient:
     def submit(self, seq: str) -> Dict[str, object]:
         return self._json(self._call("POST", "/ticket/msa", {"q": query_text(seq), "mode": self.mode}), "submit")
 
+    def _submit(self, endpoint: str, q: str, mode: str) -> Dict[str, object]:
+        return self._json(self._call("POST", f"/ticket/{endpoint}", {"q": q, "mode": mode}), "submit")
+
     def download(self, tid: str) -> bytes:
         resp = self._call("GET", f"/result/download/{urllib.parse.quote(tid)}")
         if resp.status != 200:
@@ -255,12 +258,40 @@ class ColabFoldClient:
         ``MSA().get()``. It raises RemoteNotAllowed, and sends nothing, while
         SCIGANTIC_MSA_NO_REMOTE is set.
         """
-        http.refuse_if_disabled()
         seq = canonical_sequence(seq)
-        q = query_text(seq)
-        tid = ticket_id(q, self.mode)
-        end = self.clock() + self.deadline
         started = time.time()
+        q = query_text(seq)
+        tar, tid = self._job("msa", q, self.mode, lambda: self.submit(seq))
+        return self.parse_result(tar, seq, tid, started)
+
+    @property
+    def pair_mode(self) -> str:
+        return "pairgreedy"
+
+    @property
+    def pair_dbkey(self) -> str:
+        return hashlib.sha256(f"{self.host}|{self.pair_mode}".encode()).hexdigest()[:16]
+
+    def pair_search(self, seqs: List[str]) -> "PairResult":
+        """Run (or resume) the server's paired search for the distinct
+        chains ``seqs`` of a complex, as colabfold_batch does for a
+        heteromer (``/ticket/pair``, greedy pairing, UniRef only). Returns,
+        per chain, the paired rows (the same number for every chain; None
+        where a chain has no row in a pair). Sends every chain."""
+        seqs = [canonical_sequence(s) for s in seqs]
+        if len(seqs) < 2:
+            raise ValueError("a paired search needs two or more distinct chains")
+        q = "".join(f">{101 + i}\n{s}\n" for i, s in enumerate(seqs))
+        tar, tid = self._job("pair", q, self.pair_mode, lambda: self._submit("pair", q, self.pair_mode))
+        return parse_pair_result(tar, seqs, tid, self.host)
+
+    def _job(self, endpoint: str, q: str, mode: str, submit: Callable[[], Dict[str, object]]) -> "tuple[bytes, str]":
+        http.refuse_if_disabled()
+        tid = ticket_id(q, mode)
+        replay = replay_dir()
+        if replay is not None:
+            return _replayed(replay, tid), tid
+        end = self.clock() + self.deadline
         rate_limited = 0
         maintenance = 0
         unknown = 0
@@ -280,7 +311,7 @@ class ColabFoldClient:
                 self._wait(self._ratelimit_delay(rate_limited, st.get("_retry_after")), end)
                 rate_limited += 1
                 if last == "submit":
-                    st = self.submit(seq)
+                    st = submit()
                     if st.get("status") not in ("RATELIMIT", "MAINTENANCE"):
                         submitted = True
                 else:
@@ -292,13 +323,13 @@ class ColabFoldClient:
                     raise RemoteError(f"{self.server_name} is in maintenance; try again later")
                 self._wait(self.ratelimit_initial * (2 ** maintenance), end)
                 maintenance += 1
-                st = self.submit(seq) if last == "submit" else self.status(tid)
+                st = submit() if last == "submit" else self.status(tid)
                 continue
             maintenance = 0
             if s == "UNKNOWN":
                 if not submitted:
                     last = "submit"
-                    st = self.submit(seq)
+                    st = submit()
                     if st.get("status") not in ("RATELIMIT", "MAINTENANCE"):
                         submitted = True
                         last = "status"
@@ -321,8 +352,7 @@ class ColabFoldClient:
             self._wait(self.poll_min + random.random() * self.poll_jitter, end)
             last = "status"
             st = self.status(tid)
-        tar = self.download(tid)
-        return self.parse_result(tar, seq, tid, started)
+        return self.download(tid), tid
 
     def parse_result(self, tar_bytes: bytes, seq: str, tid: str, started: Optional[float] = None) -> RemoteResult:
         try:
@@ -391,3 +421,80 @@ class ColabFoldClient:
             templates={"pdb70_m8": m8.decode("utf-8", "replace")} if m8 else None,
             members={k: v.size for k, v in members.items()},
         )
+
+
+@dataclass
+class PairResult:
+    """The server's paired search: ``rows[c][k]`` is chain c's row of pair
+    k, or None when that chain has no row there."""
+
+    rows: List[List[Optional[Row]]]
+    provenance: Dict[str, object]
+
+
+def parse_pair_result(tar_bytes: bytes, seqs: List[str], tid: str, host: str = "") -> PairResult:
+    """Read ``pair.a3m`` of a paired result: one block per chain (each
+    starting with that chain's query, ``>101``, ``>102``...), separated by
+    NUL bytes, with the same number of rows in each. A row with no residue
+    stands for a chain missing from that pair."""
+    try:
+        tf = tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz")
+        members = {m.name.lstrip("./"): m for m in tf.getmembers() if m.isfile()}
+        f = tf.extractfile(members["pair.a3m"]) if "pair.a3m" in members else None
+        raw = f.read() if f else None
+    except (tarfile.TarError, OSError, EOFError) as e:
+        raise JobFailed(f"download for paired job {tid} is not a valid tar.gz: {e}") from None
+    if not raw:
+        raise JobFailed(f"paired result for job {tid} has no pair.a3m")
+    from ..a3m import _records, match_length
+
+    blocks: Dict[int, List] = {}
+    for b in raw.decode("utf-8", "replace").replace("\r\n", "\n").split("\x00"):
+        recs = [r for r in _records(b, skip_comments=True, what="pair.a3m") if r[0] != "#len"]
+        if not recs:
+            continue
+        head = recs[0][0].split()[0] if recs[0][0].strip() else ""
+        if not head.isdigit() or not 0 <= int(head) - 101 < len(seqs):
+            raise JobFailed(f"paired result for job {tid}: a block starts with {head[:20]!r}, not a query number")
+        blocks[int(head) - 101] = recs
+    if sorted(blocks) != list(range(len(seqs))):
+        raise JobFailed(f"paired result for job {tid} has blocks for {len(blocks)} of {len(seqs)} chains")
+    n = {len(v) for v in blocks.values()}
+    if len(n) != 1:
+        raise JobFailed(f"paired result for job {tid} has a different number of rows per chain")
+    rows: List[List[Optional[Row]]] = []
+    for c, q in enumerate(seqs):
+        recs = blocks[c]
+        if recs[0][1].upper() != q:
+            raise JobFailed(f"paired result for job {tid}: block {c + 1} does not start with that chain's sequence")
+        out: List[Optional[Row]] = []
+        for h, s in recs[1:]:
+            if match_length(s) != len(q):
+                raise JobFailed(f"paired result for job {tid}: a row of chain {c + 1} is not {len(q)} columns wide")
+            out.append(Row(h, s, "uniref") if any("A" <= ch <= "Z" for ch in s) else None)
+        rows.append(out)
+    prov: Dict[str, object] = {"from": "remote", "backend": "colabfold", "server": host, "mode": "pairgreedy",
+                               "ticket": tid, "paired_rows": len(rows[0]),
+                               "computed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    return PairResult(rows, prov)
+
+
+#: Test only: a folder of ColabFold result files named <ticket id>.tar.gz.
+#: When this is set the client reads results from it instead of the
+#: network, and never contacts a server. It exists so the library can be
+#: checked against results fetched earlier without sending anything again.
+REPLAY_ENV = "SCIGANTIC_MSA_TEST_COLABFOLD_REPLAY"
+
+
+def replay_dir() -> Optional[str]:
+    v = os.environ.get(REPLAY_ENV, "").strip()
+    return v or None
+
+
+def _replayed(folder: str, tid: str) -> bytes:
+    p = os.path.join(folder, f"{tid}.tar.gz")
+    try:
+        with open(p, "rb") as fh:
+            return fh.read()
+    except OSError:
+        raise JobFailed(f"{REPLAY_ENV} is set and {folder} has no result for job {tid}") from None

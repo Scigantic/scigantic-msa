@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.3.0
+
+Open data. `run` and `MSA().get()` now merge the ColabFold server's search
+with alignments already published as open data, read where their
+publishers put them:
+
+- OpenFold3 training MSAs (`s3://openfold3-data`, CC BY 4.0), found through
+  OpenFold3's own table of representative sequences;
+- LiteFold's human proteome MSAs (Hugging Face, CC BY 4.0, a pinned
+  commit), found through its manifest;
+- OpenProteinSet UniClust30 MSAs (`s3://openfold`, CC BY 4.0), found by
+  asking UniParc for the accessions of the sequence's MD5;
+- with `--openproteinset`, OpenProteinSet's PDB MSAs, found through its
+  chain table and `alignment_db.index` (about 610 MB the first time).
+
+Each table is downloaded once into the cache, with its ETag and sha256,
+checked again at most once a day, and named in the attribution file. The
+sequence is looked up on your machine; only its MD5 goes to UniProt.
+
+Changes you may notice:
+
+- `--open-only` (`MSA(server=None)`) builds the MSA from open data alone and
+  sends the sequence to no search server. `--no-open` gives 0.2's result.
+- Rows are merged with per-row provenance. Rows with the same residues are
+  kept once, and so are rows of the same entry over the same part of it,
+  which exact-string dedup missed. ColabFold rows come first.
+- A complex gets the ColabFold server's own paired search, as
+  `colabfold_batch` sends it, then extra pairs by species from open rows
+  when the chains share an organism (`--open-pairs auto|always|never`).
+  This sends the chains to the server once more, and the confirmation says
+  so. The cap of 100 new jobs per run counts paired searches.
+- `run` prints, per chain, rows, an estimated Neff at 80% identity and
+  species for the merged MSA and for the server's result alone.
+- The attribution file lists every open set with its licence and table
+  version, the files read and rows kept per source, and a new
+  `scigantic-msa-rows/` folder holds one TSV per chain with every row's
+  source.
+- Chains are named A, B, ... in messages, as in the written files.
+- `Alignment.source` can be `merged` or `open`. `SCIGANTIC_MSA_NO_REMOTE`
+  now blocks the open data lookups too; what is in the cache is still used.
+- New `scigantic-msa sources` lists the open sets and the cached tables;
+  `--fetch` downloads them.
+- `--near` also uses open entries at 95% identity or more over 90% of the
+  query, found with a local `mmseqs`.
+- Test only: `SCIGANTIC_MSA_TEST_COLABFOLD_REPLAY` reads saved ColabFold
+  results from a folder instead of the server.
+
 ## 0.2.9
 
 Changes you may notice:

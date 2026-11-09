@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .a3m import A3MError, Row, format_a3m, match_length, parse_a3m, parse_colabfold_complex
 from .alignment import Alignment, species_key
-from .pairing import Pairing, pair_by_species
+from .pairing import ComplexPairing, Pairing, pairing_for
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
 from . import writers
 
@@ -115,7 +115,7 @@ def _pairing_note(chains: Sequence[Alignment], quiet: bool) -> Optional[Pairing]
     msas = [m for m, _ in _distinct(chains)]
     if len(msas) < 2:
         return None
-    pr = pair_by_species(msas, names=_chain_names(chains))
+    pr = pairing_for(msas, names=_chain_names(chains))
     _say(pr.message, quiet)
     return pr
 
@@ -497,6 +497,22 @@ def _protenix_pairing(msas: Sequence[Alignment]) -> Dict[str, List[Row]]:
     return out if len(out) > 1 else {}
 
 
+def _protenix_pairs(msas: Sequence[Alignment], pr: Pairing) -> Dict[str, List[Row]]:
+    """pairing.a3m rows from pairs made for the complex. Each paired row's
+    header names its pair number where Protenix reads the species
+    (``UniRef100_<acc>_<k>/``), so Protenix pairs exactly these rows and no
+    others: no two pairs share a number."""
+    out: Dict[str, List[Row]] = {}
+    for c, m in enumerate(msas):
+        rows = [Row("query", m.query, "query")]
+        for k, r in enumerate(pr.rows[c], 1):
+            if r is not None:
+                rows.append(Row(f"UniRef100_{_protenix_accession(r.header)}_{k}/", r.seq, r.db, r.taxid))
+        if len(rows) > 1:
+            out[m.query] = rows
+    return out if len(out) > 1 else {}
+
+
 def _protenix_accession(header: str) -> str:
     """An accession for a ``UniRef100_<acc>_<taxid>/`` header: the first word
     without a ``UniRef100_`` / ``UniRef90_`` prefix, or the accession of a
@@ -553,10 +569,17 @@ class Protenix:
                 raise PrepareError(f"chain {idx[0] + 1}: {why}")
         d = _out(out_dir)
         msas = [m for m, _ in dist]
-        pairing = _protenix_pairing(msas)
+        cp = getattr(msas[0], "complex_pairing", None) if len(msas) > 1 else None
+        own = isinstance(cp, ComplexPairing)
+        pairing = _protenix_pairs(msas, pairing_for(msas, names=_chain_names(chains))) if own \
+            else _protenix_pairing(msas)
         notes = []
         if len(msas) > 1:
-            if pairing:
+            if pairing and own:
+                notes.append(f"pairing.a3m written for {len(pairing)} of {len(msas)} chains; each paired row "
+                             "carries its pair number where Protenix reads the species, so Protenix pairs "
+                             "exactly the rows paired here")
+            elif pairing:
                 notes.append(f"pairing.a3m written for {len(pairing)} of {len(msas)} chains; Protenix pairs "
                              "them by species itself, including species found in only some of the chains")
                 left = [n for (m, _), n in zip(dist, _chain_names(chains)) if m.query not in pairing]

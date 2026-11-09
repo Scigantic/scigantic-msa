@@ -48,7 +48,7 @@ def test_a_full_run_talks_only_to_the_chosen_server(colabfold, connections, tmp_
     allowed.update(host="127.0.0.1", port=colabfold.port)
     ColabFoldStub(colabfold, {q: make_result_tar(q, [("UniRef100_X", q[:-1] + "A", "9606")])
                               for q in (Q_7M22A, Q_7M22C)})
-    results = MSA(quiet=True).get([Q_7M22A, Q_7M22C], remote=True)
+    results = MSA(quiet=True, open_data=False).get([Q_7M22A, Q_7M22C], remote=True)
     AlphaFold3.prepare(results, quiet=True)
     Boltz.prepare(results, out_dir=tmp_path / "b", quiet=True)
     ColabFold.prepare(results, out_dir=tmp_path / "c", quiet=True)
@@ -62,7 +62,7 @@ def test_a_full_run_talks_only_to_the_chosen_server(colabfold, connections, tmp_
         pass
     # The CLI path as well.
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO(""))
-    assert main(["run", f"{Q_7M22A}:{Q_7M22C}", "-m", "protenix", "-o", str(tmp_path / "cli"), "--yes", "-q"]) == 0
+    assert main(["run", f"{Q_7M22A}:{Q_7M22C}", "-m", "protenix", "-o", str(tmp_path / "cli"), "--yes", "-q", "--no-open"]) == 0
     conns = [a for a in seen if a[0] != "dns"]
     assert conns, "the fake server was never contacted"
     assert {(a[0], a[1]) for a in conns} == {("127.0.0.1", colabfold.port)}
@@ -92,4 +92,9 @@ def test_no_scigantic_host_in_the_source():
         for m in re.finditer(r"https?://([A-Za-z0-9.-]+)", p.read_text()):
             hosts.add(m.group(1))
     assert not any("scigantic" in h for h in hosts), hosts
-    assert hosts <= {"api.colabfold.com", "health.api.nvidia.com", "api.nvcf.nvidia.com", "github.com"}, hosts
+    servers = {"api.colabfold.com", "health.api.nvidia.com", "api.nvcf.nvidia.com", "github.com"}
+    # Open data: the publishers' own hosts, and the pages that state their terms.
+    open_hosts = {"openfold3-data.s3.us-west-2.amazonaws.com", "openfold.s3.amazonaws.com", "huggingface.co",
+                  "rest.uniprot.org", "www.uniprot.org", "colabfold.mmseqs.com", "bfd.mmseqs.com",
+                  "uniclust.mmseqs.com", "www.ebi.ac.uk"}
+    assert hosts <= servers | open_hosts, hosts

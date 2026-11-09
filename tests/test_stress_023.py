@@ -123,7 +123,7 @@ def test_new_searches_on_the_public_server_are_capped(fake, tmp_path, capsys):
                                                for _ in range(2)) + "\n" for i in range(51)))
     rc = main(["run", str(f), "--batch", "--model", "colabfold", "--out", str(tmp_path / "o"), "--yes", "-q"])
     assert fake.calls == [] and rc == 1
-    assert "102 new sequences" in capsys.readouterr().err
+    assert "102 new jobs" in capsys.readouterr().err
 
 
 def test_cap_counts_only_new_sequences(fake, tmp_path):

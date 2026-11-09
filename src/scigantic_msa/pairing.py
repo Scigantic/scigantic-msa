@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Sequence
 from .a3m import Row, ungapped
 from .alignment import Alignment, species_key
 
-__all__ = ["Pairing", "pair_by_species"]
+__all__ = ["Pairing", "pair_by_species", "ComplexPairing", "pairing_for"]
 
 
 @dataclass
@@ -124,6 +124,36 @@ def pair_by_species(msas: Sequence[Alignment], max_pairs: Optional[int] = 8192,
         many = _count(label, lonely + without) > 1
         msg += "; " + " and ".join(left) + f", so {'they are' if many else 'it is'} not paired"
     return Pairing(rows, keys, without, msg)
+
+
+@dataclass
+class ComplexPairing:
+    """Pairs made for one complex by ``MSA().get([...])``: the search
+    server's paired search plus extra pairs by species from open data.
+    ``queries`` are the distinct chain sequences in the order of
+    ``pairing.rows``."""
+
+    queries: List[str]
+    pairing: Pairing
+    server_pairs: int = 0
+    open_pairs: int = 0
+    rule: str = ""
+
+
+def pairing_for(msas: Sequence[Alignment], names: Optional[Sequence[str]] = None,
+                max_pairs: Optional[int] = 8192) -> Pairing:
+    """The pairs the writers use for these distinct chains: the complex's
+    own pairs when every chain carries the same :class:`ComplexPairing` for
+    exactly these sequences, else :func:`pair_by_species`."""
+    cp = getattr(msas[0], "complex_pairing", None) if msas else None
+    if (isinstance(cp, ComplexPairing) and all(getattr(m, "complex_pairing", None) is cp for m in msas)
+            and sorted(cp.queries) == sorted(m.query for m in msas) and len(cp.queries) == len(msas)):
+        pos = [cp.queries.index(m.query) for m in msas]
+        p = cp.pairing
+        rows = [p.rows[i] for i in pos]
+        without = [c for c, i in enumerate(pos) if i in p.chains_without_species]
+        return Pairing(rows, list(p.keys), without, p.message)
+    return pair_by_species(msas, max_pairs=max_pairs, names=names)
 
 
 def _count(label: Sequence[str], idx: Sequence[int]) -> int:

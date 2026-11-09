@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scigantic-msa"
 dynamic = ["version"]
-description = "Get a protein MSA once from the ColabFold MMseqs2 server, or bring your own A3M, and write the input files for AlphaFold 3, Boltz, Chai-1, ColabFold, OpenFold3 or Protenix."
+description = "Build protein MSAs from the ColabFold MMseqs2 server merged with published open alignments (OpenFold3, LiteFold, OpenProteinSet), and write the input files for AlphaFold 3, Boltz, Chai-1, ColabFold, OpenFold3 or Protenix."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Scigantic" }]
-keywords = ["msa", "a3m", "protein", "alphafold3", "boltz", "chai", "colabfold", "openfold", "protenix", "structure-prediction"]
+keywords = ["msa", "a3m", "open-data", "protein", "alphafold3", "boltz", "chai", "colabfold", "openfold", "protenix", "structure-prediction"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",

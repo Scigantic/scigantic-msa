@@ -34,7 +34,7 @@ from typing import IO, TYPE_CHECKING, Callable, List, Optional
 if TYPE_CHECKING:  # pragma: no cover
     from .alignment import Alignment
 
-__all__ = ["cache_dir", "atomic_write", "private_dirs", "FileLock", "AlignmentCache"]
+__all__ = ["cache_dir", "atomic_write", "private_dirs", "FileLock", "AlignmentCache", "BlobCache"]
 
 
 def _absolute_env(name: str) -> Optional[str]:
@@ -313,3 +313,28 @@ class AlignmentCache:
             except OSError:
                 pass
         return n
+
+
+class BlobCache:
+    """Other results this machine fetched, as files under
+    ``<cache>/<kind>/<aa>/<key>/<name>``, 0600 in 0700 folders. Used for
+    the server's paired searches, keyed by a hash of the chains."""
+
+    def __init__(self, root: Optional[Path] = None, kind: str = "pairs"):
+        self.base = root or cache_dir()
+        self.root = self.base / kind
+
+    def path(self, key: str, name: str) -> Path:
+        return self.root / key[:2] / key / _safe(name)
+
+    def get(self, key: str, name: str) -> Optional[bytes]:
+        try:
+            return self.path(key, name).read_bytes()
+        except OSError:
+            return None
+
+    def put(self, key: str, name: str, data: bytes) -> Path:
+        p = self.path(key, name)
+        private_dirs(p.parent, self.base)
+        atomic_write(p, data, mode=0o600)
+        return p

@@ -1,37 +1,48 @@
 """The one-shot tool: get an alignment for a sequence, or read one you have.
 
     from scigantic_msa import MSA
-    result = MSA().get(sequence, remote=True)        # asks the ColabFold server
+    result = MSA().get(sequence, remote=True)        # open data + the ColabFold server
+    result = MSA(server=None).get(sequence)          # open data only; the sequence is not sent
     result = MSA().from_a3m("my_alignment.a3m")      # no network
 
 ``get`` sends the sequence to a third-party search server, so it refuses to
-run unless you pass ``remote=True``. It checks the local cache first, so
-running the same sequence again does not submit it again.
+run unless you pass ``remote=True``. It also looks the sequence up in open
+data: the published alignments of OpenFold3, LiteFold and OpenProteinSet,
+read where their publishers put them. That lookup sends only the MD5 of the
+sequence (to UniProt) and requests for the public files that matched, never
+the sequence. The server's rows and the open rows are merged into one
+alignment per chain, with every row's source kept.
 
-Nothing here talks to any other host. There is no account, no login and no
-upload.
+It checks the local cache first, so running the same sequence again does
+not submit it again. Nothing here talks to a Scigantic server. There is no
+account, no login and no upload.
 """
 from __future__ import annotations
 
+import atexit
 import gzip
+import hashlib
 import logging
 import os
+import shutil
 import sys
+import tempfile
 import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, overload
 
 from . import http
 from .http import RemoteNotAllowed
-from .a3m import A3MError, parse_a3m, parse_stockholm
-from .alignment import _UNIPROT, Alignment
-from .cache import AlignmentCache, LockTimeout
+from .a3m import A3MError, Row, parse_a3m, parse_stockholm
+from .alignment import _UNIPROT, Alignment, species_key
+from .cache import AlignmentCache, BlobCache, LockTimeout, cache_dir as default_cache_dir
+from .pairing import ComplexPairing, pair_by_species
 from .remote import BACKENDS, announce, make_backend, remote_disabled
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
 
 log = logging.getLogger("scigantic_msa")
 
-__all__ = ["MSA", "RemoteNotAllowed", "SERVERS"]
+__all__ = ["MSA", "RemoteNotAllowed", "SERVERS", "OPEN_PAIRS"]
 
 #: What each server is, for the messages that say where a sequence goes.
 SERVERS: Dict[str, str] = {
@@ -39,6 +50,11 @@ SERVERS: Dict[str, str] = {
                  "downloaded by anyone who knows the sequence",
     "nvidia": "NVIDIA's hosted MSA Search (needs NVIDIA_API_KEY), under NVIDIA's API trial terms",
 }
+
+#: How extra pairs by species from open data are added to a complex:
+#: auto (only when every chain's organism is known and they share one),
+#: always, or never.
+OPEN_PAIRS = ("auto", "always", "never")
 
 
 #: The cache warning is said once per process, not once per MSA object.
@@ -48,10 +64,20 @@ _cache_warned = False
 class MSA:
     """Get an alignment for a protein sequence, once.
 
-    server: "colabfold" (default) or "nvidia".
+    server: "colabfold" (default), "nvidia", or None for open data only (the
+        sequence is sent to no search server).
     host: another URL for that server, for example your own ColabFold
         MMseqs2 server. Default: api.colabfold.com, or
         ``SCIGANTIC_MSA_COLABFOLD_URL`` / ``SCIGANTIC_MSA_NVIDIA_URL``.
+    open_data: merge the published open alignments of the sequence (default
+        on). False gives the server's result alone.
+    openproteinset: also use OpenProteinSet's PDB alignments, which needs
+        about 610 MB of tables the first time (default off).
+    near: also use entries at 95% identity or more over 90% of the query,
+        found with ``mmseqs`` on this machine (default off).
+    open_pairs: for a complex, when to add pairs by species from open rows
+        to the server's own pairs: "auto" (default; only when the chains
+        share an organism), "always" or "never".
     cache: keep results in a local cache (default on) so the same sequence
         is not submitted twice. ``cache_dir`` picks the directory.
     quiet: do not print progress lines to stderr.
@@ -60,17 +86,25 @@ class MSA:
 
     def __init__(
         self,
-        server: str = "colabfold",
+        server: Optional[str] = "colabfold",
         *,
         host: Optional[str] = None,
         cache: bool = True,
         cache_dir: Union[str, Path, None] = None,
         quiet: bool = False,
         backend: Any = None,
+        open_data: bool = True,
+        openproteinset: bool = False,
+        near: bool = False,
+        open_pairs: str = "auto",
+        uniparc: bool = True,
+        depth_summary: bool = True,
     ):
-        if backend is None:
+        if open_pairs not in OPEN_PAIRS:
+            raise ValueError(f"open_pairs must be one of {', '.join(OPEN_PAIRS)}, not {open_pairs!r}")
+        if backend is None and server is not None:
             if server not in BACKENDS:
-                raise ValueError(f"unknown server {server!r}; choose one of {', '.join(BACKENDS)}")
+                raise ValueError(f"unknown server {server!r}; choose one of {', '.join(BACKENDS)}, or None for open data only")
             kw: Dict[str, Any] = {}
             if host:
                 check_host(host)
@@ -80,35 +114,73 @@ class MSA:
                 if os.environ.get(env):
                     check_host(os.environ[env], env)
             backend = make_backend(server, **kw)
+        if backend is None and not open_data:
+            raise ValueError("with server=None there is nothing to search: keep open_data=True")
         self.backend = backend
-        self.server = backend.name
+        self.server = backend.name if backend is not None else None
         self.quiet = quiet
-        self._cache = AlignmentCache(Path(cache_dir).expanduser() if cache_dir else None) if cache else None
+        self.open_pairs = open_pairs
+        self.depth_summary = depth_summary
+        base = Path(cache_dir).expanduser() if cache_dir else None
+        self._cache = AlignmentCache(base) if cache else None
+        self._pairs = BlobCache(base, "pairs") if cache else None
+        self.open: Any = None
+        if open_data:
+            from .opendata.lookup import OpenData
+
+            if cache:
+                obase = base or default_cache_dir()
+            else:
+                obase = Path(tempfile.mkdtemp(prefix="scigantic-msa-"))
+                atexit.register(shutil.rmtree, str(obase), True)
+            self.open = OpenData(obase, openproteinset=openproteinset, near=near, uniparc=uniparc, say=self._say)
 
     # ------------------------------------------------------------ info
     @property
     def server_name(self) -> str:
-        """The host that receives the sequence, e.g. api.colabfold.com."""
-        return str(self.backend.server_name)
+        """The host that receives the sequence, e.g. api.colabfold.com ("" for open data only)."""
+        return str(self.backend.server_name) if self.backend is not None else ""
 
     def describe_server(self) -> str:
+        if self.backend is None:
+            return "no search server (open data only)"
         if not _is_default_host(self.backend):
             return f"{self.server_name} (a {self.server} server you chose, not the public one)"
-        return f"{self.server_name} ({SERVERS.get(self.server, self.server)})"
+        return f"{self.server_name} ({SERVERS.get(str(self.server), str(self.server))})"
+
+    def describe_open(self) -> str:
+        """What the open data lookup sends, for the messages before a run."""
+        if self.open is None:
+            return ""
+        what = ("open data: the sequence is looked up on this machine in the published tables of "
+                + ", ".join(self.open.table_ids)
+                + " (downloaded once from their publishers)")
+        if self.open.uniparc:
+            what += "; only its MD5 is sent, to rest.uniprot.org, to find the organisms that have it"
+        what += "; the public files of matching entries are then read from their publishers"
+        return what
 
     @property
     def cache_dir(self) -> Optional[Path]:
         return self._cache.root.parent if self._cache is not None else None
 
     def cached(self, sequence: str) -> Optional[Alignment]:
-        """The cached result for this sequence and server, or None. Sends nothing."""
-        if self._cache is None:
+        """The cached server result for this sequence and server, or None. Sends nothing."""
+        if self._cache is None or self.backend is None:
             return None
         q = canonical_sequence(sequence)
         return self._cache_get(seq_sha256(q))
 
+    def pair_pending(self, sequences: List[str]) -> bool:
+        """True when a complex of these chains needs a paired search the
+        cache does not hold (the server is sent every chain once more)."""
+        qs = list(dict.fromkeys(canonical_sequence(s) for s in sequences))
+        if len(qs) < 2 or self.backend is None or not hasattr(self.backend, "pair_search"):
+            return False
+        return self._pair_cached(qs) is None
+
     def _cache_get(self, sha: str) -> Optional[Alignment]:
-        if self._cache is None:
+        if self._cache is None or self.backend is None:
             return None
         try:
             return self._cache.get(sha, self.backend.name, self.backend.dbkey)
@@ -124,6 +196,7 @@ class MSA:
             return
         where = self._cache.root.parent
         self._cache = None
+        self._pairs = None
         global _cache_warned
         if _cache_warned:
             return
@@ -143,10 +216,13 @@ class MSA:
     def get(self, sequence: Union[str, List[str], Tuple[str, ...]], *,
             remote: bool = False) -> Union[Alignment, List[Alignment]]:
         """The alignment for one sequence, or a list of alignments for the
-        chains of a complex (pass a list; identical chains are searched once).
+        chains of a complex (pass a list; identical chains are searched once,
+        and the distinct chains are paired).
 
-        remote must be True: the sequence is sent to the server named in the
-        error otherwise. A cached result is used without sending anything.
+        With a search server, remote must be True: the sequence is sent to
+        the server named in the error otherwise. A cached result is used
+        without sending anything. With ``server=None`` nothing but the
+        sequence's MD5 leaves the machine, so ``remote`` is not needed.
         """
         single = isinstance(sequence, str)
         if not single and (isinstance(sequence, (bytes, bytearray)) or not isinstance(sequence, (list, tuple))):
@@ -156,21 +232,35 @@ class MSA:
         if not seqs:
             raise ValueError("no sequence given")
         queries = [protein_sequence(s, i) for i, s in enumerate(seqs, 1)]
-        if remote is not True:
-            raise RemoteNotAllowed(
-                f"MSA().get() sends the sequence to {self.describe_server()}. "
-                "Pass remote=True to allow that, or use MSA().from_a3m() with an alignment you already have."
-            )
-        if remote_disabled():
-            # A cached result sends nothing, so the kill switch allows it.
-            if any(self._cache_get(seq_sha256(q)) is None for q in queries):
-                raise RemoteNotAllowed(http.NO_REMOTE_MESSAGE)
-        done: Dict[str, Alignment] = {}
-        for i, q in enumerate(queries, 1):
-            if q not in done:
-                done[q] = self._one(q, f"chain {i}" if len(queries) > 1 else "sequence")
-        out = [done[q] for q in queries]
-        return out[0] if single else out
+        distinct = list(dict.fromkeys(queries))
+        if self.backend is not None:
+            if remote is not True:
+                raise RemoteNotAllowed(
+                    f"MSA().get() sends the sequence to {self.describe_server()}. "
+                    "Pass remote=True to allow that, use MSA(server=None) for open data only, or "
+                    "MSA().from_a3m() with an alignment you already have."
+                )
+            if remote_disabled():
+                # A cached result sends nothing, so the kill switch allows it.
+                if any(self._cache_get(seq_sha256(q)) is None for q in distinct):
+                    raise RemoteNotAllowed(http.NO_REMOTE_MESSAGE)
+        names = _distinct_names(queries)
+        server: Dict[str, Alignment] = {}
+        out: Dict[str, Alignment] = {}
+        opened: Dict[str, Any] = {}
+        for i, q in enumerate(distinct):
+            what = f"chain {names[i]}" if len(distinct) > 1 or len(queries) > 1 else "sequence"
+            if self.backend is not None:
+                server[q] = self._one(q, what)
+            if self.open is not None:
+                opened[q] = self.open.collect(q)
+                for n in opened[q].notes:
+                    self._say(f"{what}: open data: {n}")
+            out[q] = self._merge(q, server.get(q), opened.get(q), what)
+        if len(distinct) > 1:
+            self._pair(distinct, names, out, server, opened)
+        res = [out[q] for q in queries]
+        return res[0] if single else res
 
     def _one(self, q: str, what: str) -> Alignment:
         sha = seq_sha256(q)
@@ -216,6 +306,139 @@ class MSA:
             if lock is not None:
                 lock.release()
 
+    # ------------------------------------------------------------ open data
+    def _merge(self, q: str, srv: Optional[Alignment], od: Any, what: str) -> Alignment:
+        if od is None or (srv is not None and not od.rows):
+            # Open data had nothing for this sequence: the server's result as it is.
+            assert srv is not None
+            if od is not None:
+                srv.provenance = dict(srv.provenance, open=_open_record(od),
+                                      organisms={k: sorted(v) for k, v in od.organisms.items()})
+            return srv
+        from .opendata.lookup import Prov
+        from .opendata.merge import merge_rows
+
+        server_rows: List[Row] = []
+        if srv is not None:
+            tid = str(srv.provenance.get("ticket") or srv.provenance.get("server") or "")
+            for i, r in enumerate(srv.rows[1:], 1):
+                r.extra["prov"] = Prov(self.server or "server", r.db, tid, "", i)
+                server_rows.append(r)
+        rows, counts = merge_rows(q, server_rows, od.rows)
+        qrow = srv.rows[0] if srv is not None else Row("query", q, "query")
+        prov: Dict[str, Any] = dict(srv.provenance) if srv is not None else {}
+        prov["from"] = "merged" if srv is not None else "open"
+        prov["open"] = _open_record(od)
+        prov["merge"] = counts.as_dict()
+        prov["organisms"] = {k: sorted(v) for k, v in od.organisms.items()}
+        att = list(srv.attribution) if srv is not None else []
+        att += _open_attribution(od, counts)
+        m = Alignment(query=q, rows=[qrow] + rows, source="merged" if srv is not None else "open",
+                      provenance=prov, attribution=att, templates=srv.templates if srv is not None else None)
+        m.cache_path = srv.cache_path if srv is not None else None
+        if self.depth_summary:
+            m.provenance["depth"] = depth_record(m, server_rows if srv is not None else None)
+        return m
+
+    # ------------------------------------------------------------ complexes
+    def _pair_key(self, qs: List[str]) -> str:
+        b = self.backend
+        return hashlib.sha256(("|".join(seq_sha256(q) for q in qs) + "|" + b.name + "|" + b.pair_dbkey).encode()).hexdigest()
+
+    def _pair_cached(self, qs: List[str]) -> Optional[bytes]:
+        if self._pairs is None:
+            return None
+        return self._pairs.get(self._pair_key(qs), "pair.tar.gz")
+
+    def _server_pairs(self, qs: List[str], names: List[str]) -> Any:
+        """The server's paired search for these chains, or None when the
+        server has none or it is not allowed now."""
+        from .remote.colabfold import parse_pair_result
+
+        b = self.backend
+        if b is None or not hasattr(b, "pair_search"):
+            return None
+        raw = self._pair_cached(qs)
+        if raw is not None:
+            self._say(f"paired search of chains {', '.join(names)}: from the cache (nothing sent)")
+            return parse_pair_result(raw, qs, "cache", getattr(b, "host", ""))
+        if remote_disabled():
+            self._say("paired search: not in the cache and SCIGANTIC_MSA_NO_REMOTE is set, so the chains "
+                      "are paired by species instead")
+            return None
+        if not self.quiet:
+            announce(b)
+        import io
+        import tarfile
+
+        from .remote.colabfold import RemoteError
+
+        try:
+            res = b.pair_search(qs)
+        except RemoteNotAllowed:
+            raise
+        except RemoteError as e:
+            print(f"scigantic-msa: warning: the paired search failed ({e}); the chains are paired by species "
+                  "from the server's rows instead", file=sys.stderr, flush=True)
+            return None
+        if self._pairs is not None:
+            # Keep pair.a3m only, as a small tar of its own.
+            text = "\x00".join(
+                f">{101 + c}\n{q}\n" + "".join(f">{r.header}\n{r.seq}\n" if r is not None else f">gap\n{'-' * len(q)}\n"
+                                              for r in res.rows[c])
+                for c, q in enumerate(qs)).encode()
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+                info = tarfile.TarInfo("pair.a3m")
+                info.size = len(text)
+                tf.addfile(info, io.BytesIO(text))
+            try:
+                self._pairs.put(self._pair_key(qs), "pair.tar.gz", buf.getvalue())
+            except OSError as e:
+                self._drop_cache(e)
+        self._say(f"paired search of chains {', '.join(names)}: {len(res.rows[0])} paired rows")
+        return res
+
+    def _pair(self, qs: List[str], names: List[str], out: Dict[str, Alignment], server: Dict[str, Alignment],
+              opened: Dict[str, Any]) -> None:
+        from .opendata.merge import combine_pairs, organism_rule
+
+        sp = self._server_pairs(qs, names)
+        if sp is not None:
+            from .opendata.lookup import Prov
+
+            for c in range(len(qs)):
+                for k, r in enumerate(sp.rows[c], 1):
+                    if r is not None:
+                        r.extra["prov"] = Prov(self.server or "server", "paired", "", "", k)
+        base = None
+        if sp is None and server:
+            base = pair_by_species([server[q] for q in qs], names=names)
+        add_open = False
+        rule = ""
+        if opened:
+            if self.open_pairs == "never":
+                rule = "extra species pairs from open data are turned off"
+            elif self.open_pairs == "always":
+                add_open, rule = True, "extra species pairs from open data are on for any organisms"
+            else:
+                add_open, rule = organism_rule([opened[q].species() for q in qs], names)
+                if add_open:
+                    rule = "extra species pairs from open data are added because " + rule
+        open_rows = [[Row("query", q, "query")] + (opened[q].rows if q in opened else []) for q in qs]
+        plan = combine_pairs(qs, [out[q].rows for q in qs], open_rows, names,
+                             server_pairs=sp.rows if sp is not None else None, base=base,
+                             add_open=add_open and bool(opened), rule=rule)
+        cp = ComplexPairing(list(qs), plan.pairing, plan.server_pairs, plan.open_pairs, plan.rule)
+        self._say(plan.pairing.message)
+        for q in qs:
+            m = out[q]
+            m.complex_pairing = cp
+            m.provenance = dict(m.provenance, pairing={"server_pairs": plan.server_pairs,
+                                                       "open_pairs": plan.open_pairs, "rule": plan.rule,
+                                                       "paired_search": ({k: v for k, v in sp.provenance.items() if k != "ticket"}
+                                                                         if sp is not None else None)})
+
     # ------------------------------------------------------------ files
     def from_a3m(self, a3m: Union[str, bytes, os.PathLike], sequence: Optional[str] = None, *,
                  uniprot: Union[str, bytes, os.PathLike, None] = None) -> Alignment:
@@ -239,6 +462,71 @@ class MSA:
         log.info(msg)
         if not self.quiet:
             print(f"scigantic-msa: {msg}", file=sys.stderr, flush=True)
+
+
+def _distinct_names(queries: List[str]) -> List[str]:
+    """For each distinct sequence, the chain ids that have it ("B, D")."""
+    from .adapters import chain_id
+
+    ids: Dict[str, List[str]] = {}
+    for i, q in enumerate(queries):
+        ids.setdefault(q, []).append(chain_id(i))
+    return [", ".join(v) for v in ids.values()]
+
+
+def _open_record(od: Any) -> Dict[str, Any]:
+    """What the attribution file says about the open lookup of one chain."""
+    objs = []
+    for o in od.objects:
+        objs.append({k: o.get(k) for k in ("source", "entry", "role", "url", "range", "anchor", "etag",
+                                            "last_modified", "rows", "rows_used", "truncated", "error")
+                     if o.get(k) is not None})
+    return {"entries": od.entries, "objects": objs, "tables": od.tables, "uniparc": od.uniparc,
+            "notes": od.notes}
+
+
+def _open_attribution(od: Any, counts: Any) -> List[Dict[str, Any]]:
+    from .opendata.sources import SOURCES, licence_flags
+
+    used = sorted({o["source"] for o in od.objects if not o.get("error") and o.get("rows_used")})
+    out: List[Dict[str, Any]] = []
+    tables = {t["table"]: t for t in od.tables}
+    for sid in used:
+        s = SOURCES[sid]
+        a = {"id": sid, "title": s["title"], "license": s["license"], "license_url": s["license_url"],
+             "attribution": s["attribution"], "citation": s["citation"], "where": s["where"],
+             "databases": s["databases"]}
+        tid = {"openfold3": "openfold3", "litefold": "litefold", "openproteinset": "openproteinset"}.get(sid)
+        if tid in tables:
+            t = tables[tid]
+            a["table"] = {"entries": t["entries"], "files": t["files"]}
+        flags = licence_flags([sid])
+        if flags:
+            a["licence_flags"] = flags
+        out.append(a)
+    if od.uniparc is not None:
+        out.append({"id": "uniprot-uniparc", "title": "UniProt UniParc (organisms of the exact sequence, by MD5)",
+                    "license": "CC-BY-4.0", "release": od.uniparc.get("release"),
+                    "citation": "The UniProt Consortium, UniProt: the Universal Protein Knowledgebase, "
+                                "Nucleic Acids Research"})
+    return out
+
+
+def depth_record(m: Alignment, server_rows: Optional[List[Row]] = None) -> Dict[str, Any]:
+    """Rows, an estimated Neff at 80% identity and species, for the whole
+    alignment and for the server's own result alone."""
+    from .opendata.merge import neff_estimate
+
+    srv = list(server_rows or [])
+    kept_srv = sum(1 for r in m.rows[1:] if getattr(r.extra.get("prov"), "source", None) in ("colabfold", "nvidia"))
+    out: Dict[str, Any] = {"rows": len(m.rows) - 1, "server_rows": len(srv), "open_rows": len(m.rows) - 1 - kept_srv,
+                           "neff80": round(neff_estimate(m.query, m.rows[1:]), 1),
+                           "species": len({k for k in (species_key(r) for r in m.rows[1:]) if k})}
+    if server_rows is not None:
+        out["server_neff80"] = round(neff_estimate(m.query, srv), 1)
+        out["server_species"] = len({k for k in (species_key(r) for r in srv) if k})
+    return out
+
 
 
 #: The environment variable that sets each server's URL.

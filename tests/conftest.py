@@ -291,3 +291,15 @@ def colabfold(server, monkeypatch):
 
     monkeypatch.setattr(cf.time, "sleep", lambda s: None)
     return server
+
+
+@pytest.fixture(autouse=True)
+def no_open_hosts(monkeypatch):
+    """Open data hosts point nowhere unless a test serves them."""
+    from scigantic_msa.opendata import sources
+
+    for k in list(sources.BASES):
+        monkeypatch.setitem(sources.BASES, k, "http://127.0.0.1:9")
+    from scigantic_msa.opendata import net
+
+    monkeypatch.setattr(net, "UNIPROT_SPACING", 0.0)
