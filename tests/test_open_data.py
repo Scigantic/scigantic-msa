@@ -493,3 +493,26 @@ def test_cached_objects_are_private(hosts):
     files = [p for p in root.rglob("*.a3m.gz")]
     assert files and all(p.stat().st_mode & 0o077 == 0 for p in files)
     assert gzip.decompress(files[0].read_bytes()).startswith(b"#scigantic-msa-open ")
+
+
+def test_openproteinset_entries_are_read_by_byte_range(hosts):
+    ops = REAL / "ops-6t33_A"
+    blob, files, pos = b"", [], 0
+    for name in ("bfd_uniclust_hits.a3m", "mgnify_hits.a3m", "pdb70_hits.hhr", "uniref90_hits.a3m"):
+        data = (ops / name).read_bytes()
+        files.append([name, pos, len(data)])
+        blob += data
+        pos += len(data)
+    cache = {"6t33_B": {"seq": Q_6T33.lower()}, "6t33_A": {"seq": Q_6T33}, "9xyz_A": {"seq": "MKV"}}
+    index = {"6t33_A": {"db": "alignment_db_3.db", "files": files}, "6t33_B": {"db": "alignment_db_3.db", "files": files}}
+    hosts.s.static["/data_caches/chain_data_cache.json"] = json.dumps(cache, indent=4).encode()
+    hosts.s.static["/alignment_db/alignment_db.index"] = json.dumps(index, indent=4).encode()
+    hosts.s.static["/alignment_db/alignment_db_3.db"] = b"x" * 100 + blob
+    for f in files:
+        f[1] += 100
+    hosts.s.static["/alignment_db/alignment_db.index"] = json.dumps(index, indent=4).encode()
+    m = MSA(server=None, quiet=True, openproteinset=True).get(Q_6T33)
+    roles = {r.extra["prov"].role for r in m.rows[1:] if r.extra["prov"].source == "openproteinset"}
+    assert roles == {"uniref90", "bfd_uniclust", "mgnify"}
+    ranged = [r for r in hosts.s.requests if r.path_only.endswith("alignment_db_3.db")]
+    assert ranged and all(r.headers.get("Range", "").startswith("bytes=") for r in ranged)
