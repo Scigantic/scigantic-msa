@@ -9,8 +9,9 @@
 ``run`` merges the published open alignments of the sequence with a search
 on the ColabFold server, and asks once before it sends the sequence there
 (``--yes`` skips the question). ``--open-only`` uses open data alone and
-sends the sequence nowhere. ``convert`` reads alignments you already have
-and sends nothing.
+sends the sequence nowhere; the hosts of the open data still learn which
+public entries were asked for. ``convert`` reads alignments you already
+have and sends nothing.
 """
 from __future__ import annotations
 
@@ -198,8 +199,12 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
             for i, c in enumerate(cs, 1):
                 bad = sorted({ch for ch in c if not ("A" <= ch <= "Z")})
                 if bad:
+                    hint = ""
+                    if not typed and not text.lstrip("\ufeff \t\r\n").startswith((">", "#")):
+                        hint = (". The input has no FASTA header: give a FASTA file (a '>' line, then the "
+                                "sequence on the lines after it) or the sequence alone")
                     raise InvalidSequence(f"{_where(n, k, len(recs), i, len(cs))} has characters that are "
-                                          f"not amino acid letters: {''.join(bad)!r}")
+                                          f"not amino acid letters: {''.join(bad)!r}{hint}")
     except InvalidSequence as e:
         if typed and (len(arg) <= 40 or os.sep in arg):
             # Name the argument only when it could be a file name, so a long
@@ -232,6 +237,26 @@ def _jobs(arg: str, complex_: bool, batch: bool, name: Optional[str]) -> List[Tu
             what = f"record {n}" if batch else "the complex"
             raise InputError(f"{what} has {len(cs)} chains; one complex takes at most {MAX_CHAINS}")
     return jobs
+
+
+ALIGNMENT_SUFFIXES = (".a3m", ".a3m.gz", ".sto", ".sto.gz", ".stockholm")
+
+
+def _alignment_hint(arg: str) -> str:
+    """A pointer to ``convert`` when the input to ``run`` is an alignment."""
+    if not os.path.isfile(arg):
+        return ""
+    looks = arg.lower().endswith(ALIGNMENT_SUFFIXES)
+    if not looks:
+        try:
+            with open(arg, "rb") as fh:
+                looks = fh.read(64).lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"# STOCKHOLM")
+        except OSError:
+            pass
+    if not looks:
+        return ""
+    return (f" {arg} looks like an alignment: 'scigantic-msa convert {arg} --model MODEL --out DIR' writes the "
+            "model's input from it without any search.")
 
 
 def _fold(name: str) -> str:
@@ -306,8 +331,13 @@ def _depths(chains: List[Alignment], quiet: bool, job: Optional[str] = None) -> 
             else:
                 print(f"{what}: depth {d}", file=sys.stderr)
         if d <= 1:
-            hint = (" No open alignment holds this sequence; run without --open-only to search it."
-                    if c.source == "open" else "")
+            hint = ""
+            if c.source == "open":
+                o = c.provenance.get("open")
+                if isinstance(o, dict) and o.get("unpublished"):
+                    hint = " " + "; ".join(o["unpublished"]) + ". Run without --open-only to search it."
+                else:
+                    hint = " No open alignment holds this sequence; run without --open-only to search it."
             print(f"warning: {what} has depth 1 (the query only). The model will run in single-sequence "
                   f"mode, which is usually much less accurate.{hint}", file=sys.stderr)
         elif d < LOW_DEPTH:
@@ -321,16 +351,46 @@ def _sent(chains: List[Alignment], quiet: bool) -> None:
         return
     sent: List[str] = []
     looked = False
+    failed = False
     for c in chains:
         o = c.provenance.get("open")
         if isinstance(o, dict):
             looked = True
+            failed = failed or bool(o.get("failed"))
             for x in o.get("sent") or []:
                 if x not in sent:
                     sent.append(x)
     if looked:
-        print("open data sent: " + ("; ".join(sent) if sent else "nothing (tables, answers and files came from the cache)"),
-              file=sys.stderr)
+        none = "nothing" if failed else "nothing (tables, answers and files came from the cache)"
+        print("open data sent: " + ("; ".join(sent) if sent else none), file=sys.stderr)
+
+
+def _open_failures(chains: List[Alignment]) -> List[str]:
+    """What the open data lookups of these chains could not search or read."""
+    out: List[str] = []
+    for c in chains:
+        o = c.provenance.get("open")
+        for f in (o.get("failed") or []) if isinstance(o, dict) else []:
+            if f not in out:
+                out.append(f)
+    return out
+
+
+def _open_only_failed(chains: List[Alignment]) -> Optional[str]:
+    """With open data as the only source: why a chain holds only its query
+    because lookups failed (not because no table has it), or None."""
+    if not any(c.depth <= 1 and c.source == "open" for c in chains):
+        return None
+    why = _open_failures(chains)
+    if not why:
+        return None
+    msg = "open data could not be searched: " + "; ".join(why) + ". Nothing was written, since the MSA would hold only the query."
+    if remote_disabled():
+        msg += (" SCIGANTIC_MSA_NO_REMOTE is set, so only tables and files already in the cache are used; run once "
+                "without it (or 'scigantic-msa sources --fetch') to download them.")
+    else:
+        msg += " Check the network and run again, or run without --open-only to search the sequence on a server."
+    return msg
 
 
 def _ent_names(ents) -> List[str]:
@@ -345,6 +405,32 @@ def _report(files: List[str], nxt: str, quiet: bool) -> None:
     for f in files:
         print(f"wrote {f}", file=sys.stderr)
     print(f"next: {nxt}", file=sys.stderr)
+
+
+def _confirm_download(tool: MSA, a: argparse.Namespace) -> Optional[int]:
+    """None to go ahead, or an exit code: --openproteinset downloads about
+    610 MB the first time, so it asks, or needs --yes without a terminal."""
+    from .opendata.tables import SIZES_MB
+
+    if not a.openproteinset or tool.open is None or remote_disabled():
+        return None
+    if tool.open.tables.info("openproteinset") is not None and not a.no_cache:
+        return None
+    what = (f"--openproteinset downloads about {SIZES_MB['openproteinset']} MB of OpenProteinSet tables"
+            + (" for this run only (--no-cache)" if a.no_cache else " into the cache, once"))
+    if a.yes:
+        return None
+    if not sys.stdin.isatty():
+        return die(f"{what}. Run again with --yes to allow it, or download them first with "
+                   "'scigantic-msa sources --fetch --openproteinset'. Nothing was sent.", 2)
+    try:
+        ans = input(f"{what}. Download them? [y/N] ").strip().lower()
+    except EOFError:
+        ans = ""
+    if ans not in ("y", "yes"):
+        print("Nothing was downloaded or sent.", file=sys.stderr)
+        return 1
+    return None
 
 
 def _confirm(tool: MSA, pending: List[str], yes: bool, jobs: Optional[List[Tuple[str, List[str]]]] = None,
@@ -390,7 +476,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     try:
         jobs = _jobs(a.sequence, a.complex, a.batch, a.name)
     except (InvalidSequence, InputError, OSError) as e:
-        return die(str(e))
+        return die(str(e) + _alignment_hint(a.sequence))
     _warn_nucleic(jobs)
     bad_out = _unusable_out(Path(a.out), a.model, [n for n, _ in jobs] if a.batch else None)
     if bad_out:
@@ -417,13 +503,26 @@ def cmd_run(a: argparse.Namespace) -> int:
         return die("--open-only and --no-open leave nothing to search; pass one of them")
     if a.open_only and (a.host or a.server != "colabfold"):
         return die("--open-only sends the sequence to no server, so --host and --server do not apply")
+    if a.no_open and a.uniparc:
+        return die("--uniparc is part of the open data lookup, which --no-open turns off")
     try:
         tool = MSA(None if a.open_only else a.server, host=a.host, cache=not a.no_cache, quiet=a.quiet,
-                   open_data=not a.no_open, openproteinset=a.openproteinset, near=a.near, open_pairs=a.open_pairs)
+                   open_data=not a.no_open, openproteinset=a.openproteinset, near=a.near, open_pairs=a.open_pairs,
+                   uniparc=a.uniparc)
     except ValueError as e:
         return die(str(e))
+    try:
+        return _run(a, tool, jobs, refused)
+    finally:
+        tool.close()
+
+
+def _run(a: argparse.Namespace, tool: MSA, jobs: List[Tuple[str, List[str]]], refused: List[str]) -> int:
     if not a.quiet and tool.open is not None:
         print(f"Also uses {tool.describe_open()}.", file=sys.stderr)
+    rc = _confirm_download(tool, a)
+    if rc is not None:
+        return rc
     if a.open_only:
         if not a.quiet:
             print("--open-only: the sequence is not sent to any search server.", file=sys.stderr)
@@ -460,6 +559,14 @@ def cmd_run(a: argparse.Namespace) -> int:
                 print(f"scigantic-msa: job {k} of {len(jobs)}: {name}", file=sys.stderr)
             try:
                 got = tool.get(chains, remote=tool.backend is not None)
+                why = _open_only_failed(got) if tool.backend is None else None
+                if why:
+                    if not a.batch:
+                        _sent(got, a.quiet)
+                        return die(why)
+                    print(f"error: {name}: {why}", file=sys.stderr)
+                    failed.append(name)
+                    continue
                 files, nxt = write_model(a.model, got, out / name if a.batch else out, name, a.quiet)
             except (JobFailed, A3MError, PrepareError) as e:
                 # Only this job's sequence or result is at fault, so the rest
@@ -473,6 +580,10 @@ def cmd_run(a: argparse.Namespace) -> int:
                 continue
             _report(files, nxt, a.quiet)
             _depths(got, a.quiet, name if a.batch else None)
+            if tool.backend is not None and _open_failures(got):
+                print("warning: open data could not be searched in full (see above), so the MSA has fewer open "
+                      "rows than it could. Run again later, or pass --no-open to use the server alone.",
+                      file=sys.stderr)
             _sent(got, a.quiet)
     except (RemoteError, RemoteNotAllowed, A3MError, PrepareError, ImportError, OSError, ValueError) as e:
         return die(str(e))
@@ -480,6 +591,8 @@ def cmd_run(a: argparse.Namespace) -> int:
         if pending:
             print("Interrupted. The search may still be running on the server; run the same command "
                   "again to pick up the same job without sending it again.", file=sys.stderr)
+        else:
+            print("Interrupted.", file=sys.stderr)
         return 130
     if failed or refused:
         msg = f"{len(failed) + len(refused)} of {total} jobs failed: {', '.join(failed + refused)}."
@@ -532,27 +645,41 @@ def cmd_sources(a: argparse.Namespace) -> int:
     from .opendata.sources import SOURCES, UPSTREAM
     from .opendata.tables import SIZES_MB
 
+    if a.openproteinset and not a.fetch:
+        return die("--openproteinset goes with --fetch: 'scigantic-msa sources --fetch --openproteinset' downloads "
+                   "its tables (about 610 MB). 'scigantic-msa sources' alone lists every table, that one too.", 2)
     od = OpenData(cache_dir(), openproteinset=a.openproteinset, say=lambda m: print(f"scigantic-msa: {m}", file=sys.stderr))
+    print(f"cache: {cache_dir()}")
     for sid, s in SOURCES.items():
         print(f"{sid}: {s['title']}, {s['license']}{'' if s['default'] else ' (opt in)'}")
         print(f"  {s['where']}")
         print(f"  searched: {s['databases']}")
+    rc = 0
     for tid in SIZES_MB:
         if a.fetch and (tid != "openproteinset" or a.openproteinset):
             try:
+                if od.tables.check(tid):
+                    od.tables.discard(tid)  # damaged: build it again
                 od.tables.ensure(tid)
             except Exception as e:  # noqa: BLE001 - say it and go on with the next table
                 print(f"error: {tid}: {e}", file=sys.stderr)
+                rc = 1
         t = od.tables.info(tid)
+        problem = od.tables.check(tid) if t is not None else None
         if t is None:
             print(f"table {tid}: not downloaded (about {SIZES_MB[tid]} MB)")
+        elif problem:
+            print(f"table {tid}: damaged in the cache ({problem}); 'scigantic-msa sources --fetch"
+                  + (" --openproteinset" if tid == "openproteinset" else "") + "' downloads it again")
         else:
             f = t.files[0] if t.files else {}
             print(f"table {tid}: {t.entries:,} sequences, built {t.built_at}, ETag {f.get('etag')}")
+    od.tables.close()
     print("Terms of the searched databases:")
     for k, v in UPSTREAM.items():
-        print(f"  {k}: {v['terms']}{'' if v['checked'] else ' (not confirmed)'}")
-    return 0
+        flag = "" if v["checked"] or v["terms"].startswith("not confirmed") else " (not confirmed)"
+        print(f"  {k}: {v['terms']}{flag}")
+    return rc
 
 
 def cmd_version(a: argparse.Namespace) -> int:
@@ -575,13 +702,17 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--server", choices=BACKENDS, default="colabfold", help="where the sequence is sent (default colabfold)")
     r.add_argument("--host", help="URL of another server of that kind, for example your own ColabFold server")
     r.add_argument("--open-only", action="store_true",
-                   help="use only published open alignments; the sequence is sent to no search server "
-                        "(only its MD5 goes to UniProt). For unpublished sequences")
+                   help="use only published open alignments; the sequence is sent to no search server. The open "
+                        "data hosts still learn which public entries were asked for. For unpublished sequences")
     r.add_argument("--no-open", action="store_true", help="use the search server alone, without open data")
     r.add_argument("--openproteinset", action="store_true",
                    help="also use OpenProteinSet's PDB alignments (about 610 MB of tables the first time)")
     r.add_argument("--near", action="store_true",
                    help="also use open entries at 95%% identity or more over 90%% of the query (needs mmseqs on PATH)")
+    r.add_argument("--uniparc", action=argparse.BooleanOptionalAction, default=None,
+                   help="send the sequence's MD5 to UniProt to find the organisms that have it (to pair a complex) "
+                        "and its UniClust30 entries. Default: on, but off with --open-only, since the MD5 of a "
+                        "close variant of a public protein can be reversed")
     r.add_argument("--open-pairs", choices=("auto", "always", "never"), default="auto",
                    help="for a complex, when to add pairs by species from open data to the server's pairs: auto "
                         "(default: only when the chains share an organism), always or never")
@@ -591,11 +722,12 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--batch", action="store_true",
                    help=f"each FASTA record is its own job, written to its own folder under --out (at most {MAX_JOBS}); "
                         "with --name, job names are NAME_<record>")
-    r.add_argument("--yes", "-y", action="store_true", help="do not ask before sending the sequence")
+    r.add_argument("--yes", "-y", action="store_true",
+                   help="do not ask before sending the sequence, or before the --openproteinset download")
     r.add_argument("--no-cache", action="store_true", help="do not read or write the local cache")
     r.add_argument("--name", help="job name used for file names (default: FASTA header or 'query'); "
                                   "with --batch, a prefix for every job's name")
-    r.add_argument("--quiet", "-q", action="store_true")
+    r.add_argument("--quiet", "-q", action="store_true", help="print only warnings and errors")
     r.set_defaults(func=cmd_run)
 
     c = sub.add_parser("convert", help="write the model's input from alignments you already have (no network)")
@@ -607,14 +739,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="a UniProt alignment of the chain (.a3m or .sto, tr|ACC|NAME_SPECIES headers) used for "
                         "pairing; repeat once per chain, in chain order")
     c.add_argument("--name", help="job name used for file names (default: the first file's name)")
-    c.add_argument("--quiet", "-q", action="store_true")
+    c.add_argument("--quiet", "-q", action="store_true", help="print only warnings and errors")
     c.set_defaults(func=cmd_convert)
 
     sub.add_parser("cache", help="print the local cache directory (delete it to forget every result)"
                    ).set_defaults(func=cmd_cache)
     o = sub.add_parser("sources", help="list the open data sets, their licences and the tables in the cache")
     o.add_argument("--fetch", action="store_true", help="download (or refresh) the tables now")
-    o.add_argument("--openproteinset", action="store_true", help="with --fetch, also the OpenProteinSet tables")
+    o.add_argument("--openproteinset", action="store_true",
+                   help="with --fetch, also the OpenProteinSet tables (about 610 MB)")
     o.set_defaults(func=cmd_sources)
     sub.add_parser("version", help="print the version").set_defaults(func=cmd_version)
     return p
@@ -625,6 +758,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         return int(a.func(a) or 0)
     except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
         return 130
 
 

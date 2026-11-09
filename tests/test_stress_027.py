@@ -110,7 +110,9 @@ def test_no_remote_is_enforced_in_the_http_layer(monkeypatch):
 
 
 def test_cached_result_has_the_fresh_labels_templates_and_provenance(tmp_path):
-    m = MSA(backend=StubBackend(), cache_dir=tmp_path / "cache", quiet=True)
+    # Open data is left out: the second run's lookup sends less (the tables
+    # failed once already), which is the lookup's record, not the cache's.
+    m = MSA(backend=StubBackend(), cache_dir=tmp_path / "cache", quiet=True, open_data=False)
     fresh = m.get(UBQ, remote=True)
     cached = m.get(UBQ, remote=True)
     assert fresh.source == "remote" and cached.source == "cache"

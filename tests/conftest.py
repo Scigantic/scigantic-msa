@@ -56,6 +56,9 @@ def isolated_env(tmp_path, monkeypatch):
     from scigantic_msa import tool
 
     monkeypatch.setattr(tool, "_cache_warned", False)
+    # Without the cache, open data goes to one temporary folder per process;
+    # each test gets its own.
+    monkeypatch.setattr(tool, "_temp", {})
     yield
 
 
@@ -303,6 +306,11 @@ def no_open_hosts(monkeypatch):
     from scigantic_msa.opendata import net
 
     monkeypatch.setattr(net, "UNIPROT_SPACING", 0.0)
+    from scigantic_msa.opendata import tables
+
+    # The fixture tables hold a few entries; the real ones tens of thousands.
+    for k in list(tables.MIN_ENTRIES):
+        monkeypatch.setitem(tables.MIN_ENTRIES, k, 1)
 
 
 # --------------------------------------------------------------------------- open data hosts

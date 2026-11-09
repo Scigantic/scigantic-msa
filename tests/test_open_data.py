@@ -31,7 +31,7 @@ from conftest import OpenHosts, md5, LF_PATH, COMMIT  # noqa: F401
 
 def test_open_only_reads_the_published_files_of_an_exact_match(hosts):
     hosts.uniparc[md5(Q_6T33)] = (["P0DQ00.1"], [("Mediterraneibacter gnavus E1", 935582)])
-    m = MSA(server=None, quiet=True).get(Q_6T33)
+    m = MSA(server=None, quiet=True, uniparc=True).get(Q_6T33)
     assert m.source == "open" and m.depth > 10
     srcs = {r.extra["prov"].source for r in m.rows[1:]}
     roles = {r.extra["prov"].role for r in m.rows[1:]}
@@ -46,7 +46,7 @@ def test_open_only_reads_the_published_files_of_an_exact_match(hosts):
 
 def test_open_only_sends_only_the_md5_and_entry_requests(hosts):
     hosts.uniparc[md5(Q_6T33)] = (["P0DQ00"], [])
-    MSA(server=None, quiet=True).get(Q_6T33)
+    MSA(server=None, quiet=True, uniparc=True).get(Q_6T33)
     reqs = hosts.s.requests
     assert all(r.method in ("GET", "HEAD") for r in reqs)
     for r in reqs:
@@ -74,12 +74,12 @@ def test_uniclust30_entries_are_found_from_uniparc_accessions(hosts):
     hosts.uniclust.add("P0DQ00")
     a3m = REAL / "of3-6t33_A" / "cfdb_uniref30.a3m"
     hosts.s.static["/uniclust30/P0DQ00/a3m/uniclust30.a3m"] = a3m.read_bytes()
-    m = MSA(server=None, quiet=True).get(Q_6T33)
+    m = MSA(server=None, quiet=True, uniparc=True).get(Q_6T33)
     assert "uniclust30" in {r.extra["prov"].source for r in m.rows[1:]} or \
         any(o["source"] == "uniclust30" for o in m.provenance["open"]["objects"])
     # The answer is cached: a second run probes nothing.
     n = hosts.s.count(lambda r: r.path_only.startswith("/uniclust30/") and r.method == "HEAD")
-    MSA(server=None, quiet=True).get(Q_6T33)
+    MSA(server=None, quiet=True, uniparc=True).get(Q_6T33)
     assert hosts.s.count(lambda r: r.path_only.startswith("/uniclust30/") and r.method == "HEAD") == n
 
 
@@ -328,11 +328,16 @@ def test_open_only_run_from_the_command_line(hosts, tmp_path, capsys, monkeypatc
     monkeypatch.setattr("sys.stdin", io.StringIO(""))  # no terminal, no --yes: still runs
     assert main(["run", Q_6T33, "-m", "colabfold", "-o", str(tmp_path), "--open-only"]) == 0
     err = capsys.readouterr().err
-    assert "not sent to any search server" in err and "MD5" in err
+    assert "not sent to any search server" in err and "MD5" not in err
     assert "rows from open data" in err
-    assert "open data sent: the MD5 of the sequence to" in err
-    assert main(["run", Q_6T33, "-m", "colabfold", "-o", str(tmp_path), "--open-only"]) == 0
-    assert "open data sent: nothing" in capsys.readouterr().err
+    assert "open data sent: requests for the openfold3 table" in err
+    assert "requests for the public files of openfold3 entry 6t33_A" in err
+    assert not any(r.path_only == "/uniparc/search" for r in hosts.s.requests)
+    assert main(["run", Q_6T33, "-m", "colabfold", "-o", str(tmp_path), "--open-only", "--uniparc"]) == 0
+    err = capsys.readouterr().err
+    assert "MD5" in err and "open data sent: the MD5 of the sequence to" in err
+    assert main(["run", Q_6T33, "-m", "colabfold", "-o", str(tmp_path), "--open-only", "--uniparc"]) == 0
+    assert "open data sent: nothing (tables" in capsys.readouterr().err
     assert all(not r.path_only.startswith("/ticket") for r in hosts.s.requests)
 
 

@@ -19,22 +19,32 @@ sha256 of the canonical sequence. The ETag is checked again at most once a
 day (``SCIGANTIC_MSA_OPEN_REFRESH_HOURS``), and a changed ETag downloads the
 table again. While SCIGANTIC_MSA_NO_REMOTE is set, the tables already here
 are used as they are.
+
+A download is used only when it is whole (as many bytes as the server
+said, or, when it said nothing, a HEAD that gives the length) and when it
+is the file it should be: a FASTA file or the manifest's columns, with at
+least ``MIN_ENTRIES`` entries. A web page sent in its place (a captive
+portal, say) is refused and nothing is kept. A table whose SQLite file
+cannot be read is removed and built again.
 """
 from __future__ import annotations
 
 import csv
 import hashlib
+import http.client
 import io
 import json
 import os
 import sqlite3
+import threading
 import time
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from .. import http as _http
-from ..cache import FileLock, atomic_write, private_dirs
+from ..cache import FileLock, atomic_write, private_dirs, private_file
 from ..seqkey import InvalidSequence, canonical_sequence, seq_sha256
 from . import net
 from .sources import BASES, LITEFOLD_COMMIT, LITEFOLD_REPO
@@ -60,6 +70,12 @@ def _urls(tid: str) -> List[Tuple[str, str]]:
 #: Approximate first download, for messages.
 SIZES_MB = {"openfold3": 55, "litefold": 12, "openproteinset": 610}
 TABLES = tuple(SIZES_MB)
+#: A table with fewer entries than this is not the publisher's table (the
+#: real ones have tens of thousands) and is not kept.
+MIN_ENTRIES = {"openfold3": 1000, "litefold": 1000, "openproteinset": 1000}
+#: A table that could not be downloaded is not tried again in this process
+#: for this many seconds.
+DEAD_SECONDS = 300.0
 
 
 @dataclass
@@ -100,14 +116,20 @@ def _canon(seq: str) -> Optional[str]:
 class Tables:
     """The tables under ``root`` (``<cache>/open/tables``)."""
 
-    def __init__(self, root: Path, cache_base: Path, say: Callable[[str], None] = lambda m: None):
+    def __init__(self, root: Path, cache_base: Path, say: Callable[[str], None] = lambda m: None,
+                 persistent: bool = True):
         self.root = root
         self.base = cache_base
         self.say = say
+        #: False when the tables live in a temporary folder (--no-cache).
+        self.persistent = persistent
         self._dbs: Dict[str, sqlite3.Connection] = {}
         self._info: Dict[str, TableInfo] = {}
-        #: Tables that could not be downloaded in this process: not tried again.
-        self._dead: Dict[str, str] = {}
+        #: Tables that could not be downloaded lately: (error, when), not
+        #: tried again for DEAD_SECONDS.
+        self._dead: Dict[str, Tuple[str, float]] = {}
+        #: One thread at a time uses the SQLite connections and the state above.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------ state
     def _dir(self, tid: str) -> Path:
@@ -123,18 +145,89 @@ class Tables:
         db = self._dir(tid) / str(m.get("db", ""))
         if m.get("layout") != LAYOUT or not db.is_file():
             return None
-        return TableInfo(tid, m.get("files", []), int(m.get("entries", 0)), m.get("built_at", ""),
-                         float(m.get("checked_at", 0)), db)
+        try:
+            t = TableInfo(tid, m.get("files", []), int(m.get("entries", 0)), m.get("built_at", ""),
+                          float(m.get("checked_at", 0)), db)
+        except (TypeError, ValueError):
+            return None
+        if t.entries < MIN_ENTRIES.get(tid, 1):
+            return None  # never a valid table; not reused, whatever its ETag
+        return t
 
-    def ensure(self, tid: str) -> Optional[TableInfo]:
+    def check(self, tid: str) -> Optional[str]:
+        """Why the table in the cache cannot be used, or None when it can
+        (or is not here). Reads the whole SQLite file."""
+        t = self.info(tid)
+        if t is None:
+            return None
+        try:
+            c = sqlite3.connect(f"file:{t.db}?mode=ro", uri=True)
+            try:
+                ok = c.execute("PRAGMA quick_check").fetchone()
+                n = c.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+            finally:
+                c.close()
+        except sqlite3.Error as e:
+            return str(e)
+        if not ok or ok[0] != "ok":
+            return str(ok[0] if ok else "quick_check gave nothing")
+        if n != t.entries:
+            return f"it holds {n} entries, not {t.entries}"
+        return None
+
+    def _usable(self, t: TableInfo) -> bool:
+        """A cheap check that the SQLite file opens and has its table."""
+        try:
+            c = sqlite3.connect(f"file:{t.db}?mode=ro", uri=True)
+            try:
+                c.execute("SELECT sha FROM entries LIMIT 1").fetchall()
+            finally:
+                c.close()
+            return True
+        except sqlite3.Error:
+            return False
+
+    def discard(self, tid: str) -> None:
+        """Forget the table: close it and remove its files from the cache."""
+        with self._lock:
+            c = self._dbs.pop(tid, None)
+            if c is not None:
+                c.close()
+            self._info.pop(tid, None)
+            d = self._dir(tid)
+            for f in [d / "meta.json"] + list(d.glob("*.sqlite")):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+    def _sent(self, tid: str, sent: Optional[List[str]]) -> None:
+        if sent is not None:
+            hosts = sorted({urlsplit(u).netloc for _, u in _urls(tid)})
+            msg = f"requests for the {tid} table to {', '.join(hosts)} (they name no sequence)"
+            if msg not in sent:
+                sent.append(msg)
+
+    def ensure(self, tid: str, sent: Optional[List[str]] = None) -> Optional[TableInfo]:
         """The table, downloaded if it is not here and refreshed if its
         ETag changed (checked at most once a day). None when it is not here
-        and the network is off."""
+        and the network is off. Each request made is named in ``sent``."""
+        with self._lock:
+            return self._ensure(tid, sent)
+
+    def _ensure(self, tid: str, sent: Optional[List[str]]) -> Optional[TableInfo]:
         if tid in self._info:
             return self._info[tid]
-        if tid in self._dead:
-            raise net.OpenDataError(self._dead[tid])
+        dead = self._dead.get(tid)
+        if dead is not None:
+            if time.monotonic() - dead[1] < DEAD_SECONDS:
+                raise net.OpenDataError(dead[0])
+            del self._dead[tid]
         have = self.info(tid)
+        if have is not None and not self._usable(have):
+            self.say(f"the {tid} table in the cache cannot be read; it is removed and downloaded again")
+            self.discard(tid)
+            have = None
         if _http.remote_disabled():
             if have:
                 self._info[tid] = have
@@ -144,22 +237,27 @@ class Tables:
             return have
         private_dirs(self._dir(tid), self.base)
         lock = FileLock(self._dir(tid) / "table", timeout=3600)
-        lock.acquire()
+        lock.acquire(on_wait=lambda: self.say(f"waiting for another process to download the {tid} table"))
         try:
             have = self.info(tid)
-            if have and time.time() - have.checked_at < _refresh_seconds():
+            if have and time.time() - have.checked_at < _refresh_seconds() and self._usable(have):
                 self._info[tid] = have
                 return have
-            if have and self._unchanged(have):
-                self._write_meta(have, checked_at=time.time())
-                have.checked_at = time.time()
-                self._info[tid] = have
-                return have
+            if have and self._usable(have):
+                self._sent(tid, sent)
+                if self._unchanged(have):
+                    self._write_meta(have, checked_at=time.time())
+                    have.checked_at = time.time()
+                    self._info[tid] = have
+                    return have
+            self._sent(tid, sent)
             try:
                 got = self._download(tid)
-            except (net.OpenDataError, OSError, ValueError) as e:
-                self._dead[tid] = str(e)
-                raise
+            except (net.OpenDataError, OSError, ValueError, sqlite3.Error) as e:
+                self._dead[tid] = (str(e), time.monotonic())
+                if isinstance(e, net.OpenDataError):
+                    raise
+                raise net.OpenDataError(f"the {tid} table could not be built: {e}") from None
             self._info[tid] = got
             return got
         finally:
@@ -173,7 +271,8 @@ class Tables:
                     return False
             return True
         except net.OpenDataError:
-            # Cannot check now: keep using the table we have.
+            # Cannot check now: keep using the table we have (info() and
+            # _usable() have checked it is a valid table).
             return True
 
     def _write_meta(self, t: TableInfo, checked_at: float) -> None:
@@ -184,8 +283,12 @@ class Tables:
     # ------------------------------------------------------------ download and build
     def _download(self, tid: str) -> TableInfo:
         d = self._dir(tid)
-        self.say(f"downloading the {tid} sequence table (about {SIZES_MB[tid]} MB, once; "
-                 "later runs only check whether it changed)")
+        if self.persistent:
+            self.say(f"downloading the {tid} sequence table (about {SIZES_MB[tid]} MB, once; "
+                     "later runs only check whether it changed)")
+        else:
+            self.say(f"downloading the {tid} sequence table (about {SIZES_MB[tid]} MB); without the cache "
+                     "it is kept only until this process ends")
         raw: Dict[str, Path] = {}
         files: List[Dict[str, Any]] = []
         try:
@@ -198,7 +301,18 @@ class Tables:
             tmp = d / f".{stamp}.sqlite.tmp"
             if tmp.exists():
                 tmp.unlink()
-            n = _BUILDERS[tid](raw, tmp)
+            private_file(tmp).close()  # SQLite keeps the 0600 of a file that exists
+            try:
+                n = _BUILDERS[tid](raw, tmp)
+                if n < MIN_ENTRIES.get(tid, 1):
+                    raise ValueError(f"the downloaded {tid} table has {n} entries; the publisher's has tens "
+                                     "of thousands, so this is not it (a login or error page?)")
+            except BaseException:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
             os.replace(tmp, db)
             try:
                 os.chmod(db, 0o600)
@@ -229,57 +343,92 @@ class Tables:
             self._dbs[t.id] = c
         return c
 
-    def lookup(self, tid: str, sha: str) -> List[Dict[str, Any]]:
-        """Entries of table ``tid`` whose sequence has this seq_sha256."""
-        t = self.ensure(tid)
-        if t is None:
-            return []
-        cur = self._conn(t).execute("SELECT name, data FROM entries WHERE sha = ? ORDER BY name", (sha,))
-        return [dict(json.loads(data), name=name) for name, data in cur]
+    def _query(self, tid: str, sql: str, args: Tuple[Any, ...], sent: Optional[List[str]]) -> Optional[List[Any]]:
+        """The rows of ``sql`` on table ``tid``, or None when the table is
+        not here. A table whose file cannot be read is removed and built
+        again once; if that is not possible, OpenDataError."""
+        with self._lock:
+            for attempt in (0, 1):
+                t = self.ensure(tid, sent)
+                if t is None:
+                    return None
+                try:
+                    return self._conn(t).execute(sql, args).fetchall()
+                except sqlite3.Error as e:
+                    self.discard(tid)
+                    if attempt or _http.remote_disabled():
+                        raise net.OpenDataError(f"the {tid} table in the cache could not be read ({e}), so it was "
+                                                "removed; it is downloaded again on a run with the network on") from None
+                    self.say(f"the {tid} table in the cache could not be read ({e}); downloading it again")
+        return None  # pragma: no cover
 
-    def sequences(self, tid: str) -> Iterator[Tuple[str, str]]:
+    def lookup(self, tid: str, sha: str, sent: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Entries of table ``tid`` whose sequence has this seq_sha256."""
+        rows = self._query(tid, "SELECT name, data FROM entries WHERE sha = ? ORDER BY name", (sha,), sent)
+        return [dict(json.loads(data), name=name) for name, data in rows or []]
+
+    def sequences(self, tid: str, sent: Optional[List[str]] = None) -> Iterator[Tuple[str, str]]:
         """(sha, sequence) of every entry, for a near-match search."""
-        t = self.ensure(tid)
-        if t is None:
-            return
-        cur = self._conn(t).execute("SELECT DISTINCT sha, seq FROM entries")
-        yield from cur
+        rows = self._query(tid, "SELECT DISTINCT sha, seq FROM entries", (), sent)
+        yield from (tuple(r) for r in rows or [])
 
     def entry_by_sha(self, tid: str, sha: str) -> List[Dict[str, Any]]:
         return self.lookup(tid, sha)
 
     def close(self) -> None:
-        for c in self._dbs.values():
-            c.close()
-        self._dbs.clear()
+        with self._lock:
+            for c in self._dbs.values():
+                c.close()
+            self._dbs.clear()
 
 
 def _fetch_to(url: str, path: Path) -> Dict[str, Any]:
-    """Stream ``url`` into ``path``; return its record."""
+    """Stream ``url`` into ``path`` (0600); return its record. A body
+    shorter than the server said is read again. When the server gives no
+    length (and does not send it in chunks, which would show a cut), a HEAD
+    is asked for it; with no length at all, the body must end at the end of
+    a line, which a cut almost never does. A web page is refused."""
     for attempt in range(net.ATTEMPTS):
         sha = hashlib.sha256()
         n = 0
+        last = b""
         try:
             with net.stream(url, timeout=120) as (r, h):
-                with open(path, "wb") as out:
+                if "text/html" in h.get("content-type", "").lower():
+                    raise net.OpenDataError(f"{_http._short(url)} answered with a web page, not the table "
+                                            "(a login page or a proxy?)")
+                with private_file(path) as out:
                     while True:
                         chunk = r.read(1 << 20)
                         if not chunk:
                             break
                         sha.update(chunk)
                         n += len(chunk)
+                        last = chunk[-1:]
                         out.write(chunk)
                 want = h.get("content-length")
+                if not (want and want.isdigit()) and "chunked" not in h.get("transfer-encoding", "").lower():
+                    hit = net.head(getattr(r, "url", url) or url)
+                    want = hit.headers.get("content-length") if hit.status == 200 else None
+                    if not (want and want.isdigit()) and last not in (b"\n", b"}"):
+                        raise ConnectionError(f"the download stopped after {n} bytes in the middle of a line, "
+                                              "and the server gives no length to check it against")
                 if want and want.isdigit() and int(want) != n:
                     raise ConnectionError(f"got {n} of {want} bytes")
                 return {"url": url, "final_url": getattr(r, "url", url), "etag": net.etag_of(h),
                         "last_modified": h.get("last-modified"), "bytes": n, "sha256": sha.hexdigest(),
                         "fetched_at": _now()}
-        except (ConnectionError, OSError) as e:
+        except (ConnectionError, OSError, http.client.HTTPException) as e:
             if isinstance(e, net.OpenDataError) or attempt == net.ATTEMPTS - 1:
                 raise net.OpenDataError(f"could not download {url}: {e}") from None
             _http._sleep(2.0 * (attempt + 1))
     raise net.OpenDataError(url)  # pragma: no cover
+
+
+def _looks_like_html(path: Path) -> bool:
+    with open(path, "rb") as fh:
+        head = fh.read(512).lstrip().lower()
+    return head.startswith((b"<!doctype", b"<html", b"<?xml", b"<head", b"<body"))
 
 
 def _new_db(path: Path) -> sqlite3.Connection:
@@ -297,6 +446,10 @@ def _finish(c: sqlite3.Connection) -> int:
 
 
 def _build_openfold3(raw: Dict[str, Path], out: Path) -> int:
+    with open(raw["fasta"], "rb") as fh:
+        if not fh.read(4096).lstrip().startswith(b">"):
+            raise ValueError("the OpenFold3 sequence table is not a FASTA file"
+                             + (" (it is a web page)" if _looks_like_html(raw["fasta"]) else ""))
     c = _new_db(out)
     rows = []
     with open(raw["fasta"], encoding="utf-8", errors="replace") as fh:
@@ -317,15 +470,23 @@ def _build_openfold3(raw: Dict[str, Path], out: Path) -> int:
 
 
 def _build_litefold(raw: Dict[str, Path], out: Path) -> int:
-    c = _new_db(out)
     rows = []
-    with open(raw["manifest"], encoding="utf-8", newline="") as fh:
-        for r in csv.DictReader(fh, delimiter="\t"):
+    with open(raw["manifest"], encoding="utf-8", errors="replace", newline="") as fh:
+        rd = csv.DictReader(fh, delimiter="\t")
+        if not {"acc", "sequence", "a3m_path"} <= set(rd.fieldnames or []):
+            raise ValueError("the LiteFold manifest does not have the columns acc, sequence and a3m_path"
+                             + (" (it is a web page)" if _looks_like_html(raw["manifest"]) else ""))
+        for r in rd:
             q = _canon(r.get("sequence") or "")
-            if not q or not r.get("a3m_path"):
+            if not q or not r.get("a3m_path") or not r.get("acc"):
                 continue
-            data = {"path": r["a3m_path"], "bytes": int(r.get("a3m_bytes") or 0), "entry": r.get("entry", "")}
+            try:
+                size = int(r.get("a3m_bytes") or 0)
+            except ValueError:
+                continue  # one broken row, not the whole table
+            data = {"path": r["a3m_path"], "bytes": size, "entry": r.get("entry", "")}
             rows.append((seq_sha256(q), r["acc"], q, json.dumps(data)))
+    c = _new_db(out)
     c.executemany("INSERT INTO entries VALUES (?,?,?,?)", rows)
     return _finish(c)
 

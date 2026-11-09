@@ -8,10 +8,14 @@
 ``get`` sends the sequence to a third-party search server, so it refuses to
 run unless you pass ``remote=True``. It also looks the sequence up in open
 data: the published alignments of OpenFold3, LiteFold and OpenProteinSet,
-read where their publishers put them. That lookup sends only the MD5 of the
-sequence (to UniProt) and requests for the public files that matched, never
-the sequence. The server's rows and the open rows are merged into one
-alignment per chain, with every row's source kept.
+read where their publishers put them. That lookup never sends the
+sequence. It downloads the tables, and asks for the public files of the
+entries that matched, so those hosts learn which public entries you asked
+for. With a search server it also sends the sequence's MD5 to UniProt
+(``uniparc``); that is off for open data only, since the MD5 of a close
+variant of a public protein can be reversed by trying the variants. The
+server's rows and the open rows are merged into one alignment per chain,
+with every row's source kept.
 
 It checks the local cache first, so running the same sequence again does
 not submit it again. Nothing here talks to a Scigantic server. There is no
@@ -25,9 +29,12 @@ import hashlib
 import logging
 import os
 import shutil
+import signal
 import sys
 import tempfile
+import threading
 import urllib.parse
+import weakref
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, overload
 
@@ -60,6 +67,47 @@ OPEN_PAIRS = ("auto", "always", "never")
 #: The cache warning is said once per process, not once per MSA object.
 _cache_warned = False
 
+#: Without the cache, open data goes to one temporary folder per process.
+_temp: Dict[str, Path] = {}
+_temp_lock = threading.Lock()
+
+
+def _temp_base() -> Path:
+    """The temporary folder for open data without the cache, one per
+    process, so the tables are downloaded once per process and not once per
+    MSA object. Removed at exit, and on SIGTERM when nothing else handles
+    that signal."""
+    with _temp_lock:
+        p = _temp.get("base")
+        if p is None or not p.is_dir():
+            p = Path(tempfile.mkdtemp(prefix="scigantic-msa-"))
+            _temp["base"] = p
+            atexit.register(shutil.rmtree, str(p), True)
+            _remove_on_sigterm()
+        return p
+
+
+def _remove_on_sigterm() -> None:
+    if threading.current_thread() is not threading.main_thread():
+        return
+    try:
+        if signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL:
+            return  # someone else handles it
+    except (AttributeError, ValueError):
+        return
+
+    def handler(signum: int, frame: Any) -> None:
+        p = _temp.get("base")
+        if p is not None:
+            shutil.rmtree(str(p), True)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    try:
+        signal.signal(signal.SIGTERM, handler)
+    except (OSError, ValueError):
+        pass
+
 
 class MSA:
     """Get an alignment for a protein sequence, once.
@@ -78,8 +126,17 @@ class MSA:
     open_pairs: for a complex, when to add pairs by species from open rows
         to the server's own pairs: "auto" (default; only when the chains
         share an organism), "always" or "never".
+    uniparc: send the sequence's MD5 to UniProt's UniParc to find the
+        organisms that have exactly this sequence (used to pair a complex)
+        and its UniClust30 entries. Default: on with a search server, off
+        with ``server=None``, because the MD5 of a close variant of a public
+        protein can be reversed by trying the variants.
     cache: keep results in a local cache (default on) so the same sequence
-        is not submitted twice. ``cache_dir`` picks the directory.
+        is not submitted twice. ``cache_dir`` picks the directory. Without
+        it, open data goes to a temporary folder: the tables are shared by
+        the MSA objects of one process, and each object's files are removed
+        by ``close()`` (or a ``with`` block), when the object is collected,
+        and at exit.
     quiet: do not print progress lines to stderr.
     backend: a ready client object, mainly for tests.
     """
@@ -97,7 +154,7 @@ class MSA:
         openproteinset: bool = False,
         near: bool = False,
         open_pairs: str = "auto",
-        uniparc: bool = True,
+        uniparc: Optional[bool] = None,
         depth_summary: bool = True,
     ):
         if open_pairs not in OPEN_PAIRS:
@@ -125,15 +182,35 @@ class MSA:
         self._cache = AlignmentCache(base) if cache else None
         self._pairs = BlobCache(base, "pairs") if cache else None
         self.open: Any = None
+        self._finalizer: Any = None
         if open_data:
             from .opendata.lookup import OpenData
 
+            if uniparc is None:
+                uniparc = backend is not None
+            work = None
             if cache:
                 obase = base or default_cache_dir()
             else:
-                obase = Path(tempfile.mkdtemp(prefix="scigantic-msa-"))
-                atexit.register(shutil.rmtree, str(obase), True)
-            self.open = OpenData(obase, openproteinset=openproteinset, near=near, uniparc=uniparc, say=self._say)
+                obase = _temp_base()
+                work = Path(tempfile.mkdtemp(prefix="run-", dir=str(obase)))
+                self._finalizer = weakref.finalize(self, shutil.rmtree, str(work), True)
+            self.open = OpenData(obase, openproteinset=openproteinset, near=near, uniparc=bool(uniparc),
+                                 say=self._say, work=work, persistent=cache)
+
+    def close(self) -> None:
+        """Close the open data tables and, without the cache, remove the
+        files this object read. The object can still be used after."""
+        if self.open is not None:
+            self.open.tables.close()
+        if self._finalizer is not None:
+            self._finalizer()
+
+    def __enter__(self) -> "MSA":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     # ------------------------------------------------------------ info
     @property
@@ -149,16 +226,22 @@ class MSA:
         return f"{self.server_name} ({SERVERS.get(str(self.server), str(self.server))})"
 
     def describe_open(self) -> str:
-        """What the open data lookup sends, for the messages before a run."""
+        """What the open data lookup sends, for the messages before a run.
+        It names the same requests as the record of what was sent after."""
         if self.open is None:
             return ""
-        what = ("open data: the sequence is looked up on this machine in the published tables of "
-                + ", ".join(self.open.table_ids)
-                + " (downloaded once from their publishers)")
+        tids = ", ".join(self.open.table_ids)
+        if remote_disabled():
+            return (f"open data from the cache only: the tables of {tids} and the files already read there "
+                    "(SCIGANTIC_MSA_NO_REMOTE is set, so nothing is sent)")
+        when = "once, then checked once a day" if self.open.tables.persistent else "for this process only"
+        what = (f"open data: the sequence is looked up on this machine in the published tables of {tids} "
+                f"(downloaded from their publishers {when}). It sends requests for those tables, and "
+                "requests for the public files of matching entries to their publishers")
         if self.open.uniparc:
-            what += "; only its MD5 is sent, to rest.uniprot.org, to find the organisms that have it"
-        what += "; the public files of matching entries are then read from their publishers"
-        return what
+            what += ("; the MD5 of the sequence to rest.uniprot.org (UniParc), to find the organisms that have "
+                     "it; and up to 25 UniProt accessions of it to openfold.s3.amazonaws.com (UniClust30 entries)")
+        return what + ". The sequence itself is not sent"
 
     @property
     def cache_dir(self) -> Optional[Path]:
@@ -221,8 +304,9 @@ class MSA:
 
         With a search server, remote must be True: the sequence is sent to
         the server named in the error otherwise. A cached result is used
-        without sending anything. With ``server=None`` nothing but the
-        sequence's MD5 leaves the machine, so ``remote`` is not needed.
+        without sending anything. With ``server=None`` the sequence does not
+        leave the machine, so ``remote`` is not needed; requests for public
+        tables and files still do (see ``describe_open``).
         """
         single = isinstance(sequence, str)
         if not single and (isinstance(sequence, (bytes, bytearray)) or not isinstance(sequence, (list, tuple))):
@@ -482,7 +566,7 @@ def _open_record(od: Any) -> Dict[str, Any]:
                                             "last_modified", "rows", "rows_used", "truncated", "error")
                      if o.get(k) is not None})
     return {"entries": od.entries, "objects": objs, "tables": od.tables, "uniparc": od.uniparc,
-            "notes": od.notes, "sent": od.sent}
+            "notes": od.notes, "sent": od.sent, "failed": od.failed, "unpublished": od.unpublished}
 
 
 def _open_attribution(od: Any, counts: Any) -> List[Dict[str, Any]]:
