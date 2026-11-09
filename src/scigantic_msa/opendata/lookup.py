@@ -374,8 +374,10 @@ class OpenData:
                 with net.stream(f.url, headers=headers, timeout=120) as (r, h):
                     lines = _lines(r)
                     if f.fmt == "sto":
+                        clen = h.get("content-length")
                         parsed = parse_sto_lines(lines, seq, max_rows=self.max_rows, max_bytes=cap,
-                                                 reopen=lambda: _reread(f.url, headers))
+                                                 reopen=lambda: _reread(f.url, headers),
+                                                 size=int(clen) if clen and clen.isdigit() else None)
                     else:
                         parsed = parse_a3m_lines(lines, seq, max_rows=self.max_rows, max_bytes=cap)
                     meta = {"url": f.url, "etag": net.etag_of(h), "last_modified": h.get("last-modified"),

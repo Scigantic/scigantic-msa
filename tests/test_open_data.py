@@ -453,6 +453,18 @@ def test_wrapped_stockholm_is_read_again_and_joined():
     assert p.rows[1][0] == "h1/1-12 x OX=5"
 
 
+def test_a_wrapped_stockholm_over_the_cap_keeps_only_its_first_rows():
+    q = "ACDEFGHIKLMN"
+    names = ["query"] + [f"h{i}" for i in range(20)]
+    b1 = "".join(f"{n} {'ACDEFG' if n == 'query' else 'ACDEFA'}\n" for n in names)
+    b2 = "".join(f"{n} {'HIKLMN' if n == 'query' else 'HIKLMA'}\n" for n in names)
+    text = f"# STOCKHOLM 1.0\n\n{b1}\n{b2}//\n".encode()
+    lines = [x + b"\n" for x in text.split(b"\n")]
+    p = parse_sto_lines(lines, q, max_bytes=len(text) // 4, size=len(text), reopen=lambda: iter(lines))
+    assert 1 < len(p.rows) <= 7 and p.truncated
+    assert all(r[1] == "ACDEFAHIKLMA" for r in p.rows[1:])
+
+
 def test_caps_cut_a_file_and_say_so():
     q = "ACDEFGHIKL"
     body = f">q\n{q}\n" + "".join(f">r{i}\nACDEFGHIK{'ACDEFGHIKLMNPQRSTVWY'[i % 20]}\n" for i in range(1, 40))

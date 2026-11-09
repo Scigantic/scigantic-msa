@@ -157,18 +157,21 @@ def _sto_convert(aln: str, insert: List[bool]) -> str:
 
 def parse_sto_lines(lines: Iterable[bytes], query: str, *, max_rows: Optional[int] = None,
                     max_bytes: Optional[int] = None,
-                    reopen: Optional[Callable[[], Iterable[bytes]]] = None) -> Parsed:
+                    reopen: Optional[Callable[[], Iterable[bytes]]] = None,
+                    size: Optional[int] = None) -> Parsed:
     """Stockholm, converted line by line when it has one block (all
     ``#=GS`` lines, then one line per sequence). A file with several blocks
     (OpenFold3 wraps wide alignments at 200 columns) is read again through
-    ``reopen`` and joined in memory; then ``max_rows`` still applies but
-    ``max_bytes`` does not, since every block is needed for every row."""
+    ``reopen`` and joined in memory. Every block is needed for every row, so
+    there ``max_bytes`` limits the rows kept instead: with the file's
+    ``size`` known, only as many of the first rows as fit in ``max_bytes``
+    are kept, and so held in memory."""
     try:
         return _sto_stream(lines, query, max_rows, max_bytes)
     except _Interleaved:
         if reopen is None:
             raise SourceMismatch("Stockholm file has several blocks") from None
-        return _sto_blocks(reopen(), query, max_rows)
+        return _sto_blocks(reopen(), query, max_rows, max_bytes, size)
 
 
 def _sto_stream(lines: Iterable[bytes], query: str, max_rows: Optional[int], max_bytes: Optional[int]) -> Parsed:
@@ -239,17 +242,32 @@ def _sto_stream(lines: Iterable[bytes], query: str, max_rows: Optional[int], max
     return p
 
 
-def _sto_blocks(lines: Iterable[bytes], query: str, max_rows: Optional[int]) -> Parsed:
+def _sto_blocks(lines: Iterable[bytes], query: str, max_rows: Optional[int], max_bytes: Optional[int] = None,
+                size: Optional[int] = None) -> Parsed:
     order: List[str] = []
     seqs: Dict[str, List[str]] = {}
     desc: Dict[str, str] = {}
     n = 0
     cut = False
+    pruned = False
     for raw in lines:
         n += len(raw)
         line = (raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else raw).rstrip("\r\n")
         if line.startswith("//"):
             break
+        if not line.strip() and order and not pruned:
+            # End of the first block: every row has been named.
+            pruned = True
+            if size and max_bytes and size > max_bytes:
+                keep = max(2, int(len(order) * max_bytes / size))
+                if keep < len(order):
+                    for k in order[keep:]:
+                        del seqs[k]
+                    order = order[:keep]
+                    cut = True
+            if max_rows is not None:
+                max_rows = min(max_rows, len(order) - 1)
+            continue
         if line.startswith("#=GS "):
             parts = line[5:].split(None, 2)
             if len(parts) == 3 and parts[1] == "DE":
@@ -261,6 +279,8 @@ def _sto_blocks(lines: Iterable[bytes], query: str, max_rows: Optional[int]) -> 
         if len(parts) != 2:
             continue
         if parts[0] not in seqs:
+            if pruned:
+                continue
             if max_rows is not None and len(order) > max_rows:
                 cut = True
                 continue
