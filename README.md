@@ -318,7 +318,12 @@ ColabFold's with the default sets, and 2.5 times with `--openproteinset
 --near`. Of the 17 targets where ColabFold gave fewer than 5 Neff per
 residue, 5 went from under 1.4 to over 5 with the default sets (6 with
 both options), and 5 stayed under 1 because no open set has more for them.
-Depth is not accuracy; no structure was predicted for this.
+Depth is not accuracy. AlphaFold2 (ColabFold 1.5.5, 5 models, no
+templates) on those 17 targets gave no better structures with the merged
+MSA: the top model's TM-score changed by a median -0.004 on the 13 targets
+with most of the chain modelled, and dropped by more than 0.02 on 3. With
+open data only (`--open-only`) the median change was -0.006, so for these
+proteins open data alone gave structures as good as the server's MSA.
 
 Open data only has what was published: PDB chains (OpenFold3 to 2025,
 OpenProteinSet to 2021), the human proteome and UniClust30
