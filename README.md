@@ -311,6 +311,15 @@ Merging, for each chain:
    whole server result first, so open rows count most where the server
    found few.
 
+Measured on 50 PDB monomers released from 2023 on, each of which has an
+open entry, with ColabFold results fetched once and replayed: the merged
+MSA's Neff at 80% identity (after the dedup above) was a median 2.0 times
+ColabFold's with the default sets, and 2.5 times with `--openproteinset
+--near`. Of the 17 targets where ColabFold gave fewer than 5 Neff per
+residue, 5 went from under 1.4 to over 5 with the default sets (6 with
+both options), and 5 stayed under 1 because no open set has more for them.
+Depth is not accuracy; no structure was predicted for this.
+
 Open data only has what was published: PDB chains (OpenFold3 to 2025,
 OpenProteinSet to 2021), the human proteome and UniClust30
 representatives. A sequence in none of them gets nothing from open data,
