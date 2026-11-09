@@ -66,6 +66,11 @@ CHAI_SOURCES = ("query", "uniprot", "uniref90", "bfd_uniclust", "mgnify")
 #: Chai-1 pairs at most this many rows, the query included
 #: (``MAX_PAIRED_DEPTH`` in chai_lab's msas/preprocess.py).
 CHAI_MAX_PAIRED = 8192
+#: Chai-1 keeps at most this many rows of each source, the query included
+#: (``msa_dataset_source_to_quota`` in chai_lab's msas/data_source.py,
+#: applied in file order by ``parse_aligned_pqt_to_msa_context``).
+#: bfd_uniclust has no limit.
+CHAI_QUOTAS = {"uniref90": 10_000, "uniprot": 50_000, "mgnify": 5_000}
 #: Boltz pairs at most this many rows, the query included
 #: (``max_pairs`` of ``construct_paired_msa`` in boltz's featurizerv2.py).
 BOLTZ_MAX_PAIRED = 8192
@@ -124,7 +129,11 @@ SIDECAR_PROVENANCE = ("from", "backend", "server", "mode", "databases", "compute
 #: Folder, next to the attribution file, of one table per chain that says
 #: where every row came from.
 ROWS_DIR = "scigantic-msa-rows"
-ROWS_COLUMNS = ("row", "id", "source", "role", "entry", "object", "record", "anchor", "licence", "also_in")
+#: ``bytes`` is the part of ``object`` the row was read from, as an HTTP
+#: Range (``first-last``), when only part of it was read (OpenProteinSet's
+#: shared ``alignment_db`` files); ``record`` counts from the start of it.
+ROWS_COLUMNS = ("row", "id", "source", "role", "entry", "object", "bytes", "record", "anchor", "licence",
+                "also_in")
 
 
 def _public_provenance(prov: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,17 +204,24 @@ def _row_tables(directory: Path, chains: Sequence[Alignment]) -> Dict[str, str]:
         if not any("prov" in r.extra for r in m.rows[1:]):
             continue
         lines = ["\t".join(ROWS_COLUMNS)]
+        ranges: Dict[Tuple[Any, ...], str] = {}
+        for o in _list((m.provenance.get("open") or {}).get("objects")):
+            rg = o.get("range") if isinstance(o, dict) else None
+            if isinstance(rg, list) and len(rg) == 2 and rg[1] is not None:
+                ok = (o.get("source"), o.get("entry"), o.get("role"), o.get("url"), o.get("anchor"))
+                ranges[ok] = f"{int(rg[0])}-{int(rg[0]) + int(rg[1]) - 1}"
 
-        def line(label: str, r: Row) -> str:
+        def line(label: str, r: Row, ranges: Dict[Tuple[Any, ...], str] = ranges) -> str:
             p = r.extra.get("prov")
             rid = r.header.split(None, 1)[0].split("\t", 1)[0] if r.header.strip() else ""
             if p is None:
-                cells = [label, rid, "", r.db, "", "", "", "", "", ""]
+                cells = [label, rid, "", r.db, "", "", "", "", "", "", ""]
             else:
                 lic = SOURCES.get(p.source, {}).get("license") or (COLABFOLD["license"] if p.source == "colabfold" else "")
                 url = p.url if p.source not in ("colabfold", "nvidia") else ""
                 entry = p.entry if p.source not in ("colabfold", "nvidia") else ""
-                cells = [label, rid, p.source, p.role, entry, url, str(p.record), p.anchor, lic,
+                rg = ranges.get((p.source, p.entry, p.role, p.url, p.anchor), "") if url else ""
+                cells = [label, rid, p.source, p.role, entry, url, rg, str(p.record), p.anchor, lic,
                          ",".join(sorted(r.extra.get("also", ())))]
             return "\t".join(c.replace("\t", " ") for c in cells)
 
@@ -650,14 +666,26 @@ def write_boltz(chains: Sequence[Alignment], directory: "str | Path", *, pairing
     else:
         pr = _pairing(msas, pairing)
         notes.append(pr.message)
+        names = _entity_names(ents)
         for c, m in enumerate(msas):
             lines = ["key,sequence", f"-1,{m.query}"]
             # Pairs past Boltz's cap stay in the file as unpaired rows:
             # Boltz drops a keyed row it does not pair.
             keyed = [r for r in pr.rows[c][:BOLTZ_MAX_PAIRED - 1]]
+            seen = {m.query}
+            repeats = 0
             for k, r in enumerate(keyed, 1):
                 if r is not None:
                     lines.append(f"{k},{r.seq}")
+                    res = ungapped(r.seq)
+                    repeats += res in seen
+                    seen.add(res)
+            if repeats:
+                # Boltz reads a row that repeats an earlier one of the chain
+                # only once, so that pair loses this chain's row.
+                notes.append(f"Boltz reads a row that repeats an earlier row of the same chain only once, so "
+                             f"{repeats} paired rows of {'chains' if ', ' in names[c] else 'chain'} {names[c]} "
+                             "are not paired in Boltz (the other models keep them)")
             used = {id(r) for r in keyed if r is not None}
             for r in m.rows[1:]:
                 if id(r) not in used:
@@ -683,6 +711,29 @@ def chai_source(row: Row) -> str:
     if row.db == "mgnify":
         return "mgnify"
     return "bfd_uniclust"
+
+
+def chai_quota_note(sources: Sequence[str], keys: Sequence[str], what: str) -> Optional[str]:
+    """What Chai-1's per-source quotas drop from one chain's file, or None.
+    ``sources`` and ``keys`` are the file's source_database and pairing_key
+    columns, query first."""
+    n: Dict[str, int] = {}
+    dropped: Dict[str, int] = {}
+    keyed = 0
+    for i, (src, key) in enumerate(zip(sources, keys)):
+        if i == 0:
+            continue
+        n[src] = n.get(src, 0) + 1
+        if src in CHAI_QUOTAS and n[src] > CHAI_QUOTAS[src] - 1:
+            dropped[src] = dropped.get(src, 0) + 1
+            keyed += bool(key)
+    if not dropped:
+        return None
+    each = "; ".join(f"{n[s]:,} {s} rows, of which it reads the first {CHAI_QUOTAS[s] - 1:,} and drops "
+                     f"{d:,}" for s, d in dropped.items())
+    return (f"Chai-1 reads at most a fixed number of rows of each source; {what} has {each}. The rows are in "
+            "merge order, best first, so the weakest go"
+            + (f"; {keyed:,} of them are paired rows, whose pairs Chai-1 loses" if keyed else ""))
 
 
 def chai_expected_basename(sequence: str) -> str:
@@ -714,6 +765,7 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
     pr = _pairing(msas, pairing) if len(msas) > 1 else None
     if pr is not None:
         notes.append(pr.message)
+    names = _entity_names(ents)
     columns: List[Dict[str, List[str]]] = []
     for c, m in enumerate(msas):
         keyed: Dict[int, str] = {}
@@ -732,6 +784,11 @@ def write_chai(chains: Sequence[Alignment], directory: "str | Path", *, pairing:
             "pairing_key": [keyed.get(id(r), "") for r in rows],
             "comment": [r.header for r in rows],
         })
+        what = "the sequence" if len(chains) == 1 else (
+            ("chains " if ", " in names[c] else "chain ") + names[c])
+        quota = chai_quota_note(columns[-1]["source_database"], columns[-1]["pairing_key"], what)
+        if quota:
+            notes.append(quota)
     # Chai-1 finds a file only by its sequence, in one folder, so each set
     # of files gets a folder named for its content.
     kind = "paired" if pr is not None and pr.n_paired else "unpaired"

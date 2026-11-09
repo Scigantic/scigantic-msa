@@ -43,6 +43,22 @@ Privacy of the open data lookup:
 
 Changes you may notice:
 
+- Pairs by species use only species: UniRef rows of clusters with more
+  than one member (UniRef100 and 50 too, not only 90), taxa above species
+  ("Bacteria", "unclassified ..."), and UniProt's virtual codes such as
+  `9GAMM` no longer pair. A merged row never takes the species of an
+  identical row from another source.
+- The server's paired search is kept whole; only pairs that repeat an
+  earlier pair in every chain are left out. Pairs by species from open data
+  come from the merged rows, so they never bring back a copy the merge
+  removed. The pairing message says the server's paired rows are written in
+  addition to each chain's rows, and is printed once per run.
+- UniClust30 files that start with a consensus row are read (they were all
+  refused).
+- Chai-1 writes say when Chai's per-source quotas will drop rows; Boltz
+  writes note pairs Boltz loses to a repeated row.
+- The row TSV has a `bytes` column: the range of a shared OpenProteinSet
+  file the row was read from.
 - `--open-only` (`MSA(server=None)`) builds the MSA from open data alone and
   sends the sequence to no search server. `--no-open` gives 0.2's result.
 - Rows are merged with per-row provenance. Rows with the same residues are

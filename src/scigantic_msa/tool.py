@@ -486,6 +486,7 @@ class MSA:
     def _pair(self, qs: List[str], names: List[str], out: Dict[str, Alignment], server: Dict[str, Alignment],
               opened: Dict[str, Any]) -> None:
         from .opendata.merge import combine_pairs, organism_rule
+        from .opendata.sources import SOURCES as OPEN_SETS
 
         sp = self._server_pairs(qs, names)
         if sp is not None:
@@ -509,7 +510,11 @@ class MSA:
                 add_open, rule = organism_rule([opened[q].species() for q in qs], names)
                 if add_open:
                     rule = "extra species pairs from open data are added because " + rule
-        open_rows = [[Row("query", q, "query")] + (opened[q].rows if q in opened else []) for q in qs]
+        # The pool for open pairs is the open rows the merge kept, so a pair
+        # never brings back a copy the merge dropped.
+        open_rows = [[Row("query", q, "query")]
+                     + [r for r in out[q].rows[1:] if getattr(r.extra.get("prov"), "source", None) in OPEN_SETS]
+                     for q in qs]
         plan = combine_pairs(qs, [out[q].rows for q in qs], open_rows, names,
                              server_pairs=sp.rows if sp is not None else None, base=base,
                              add_open=add_open and bool(opened), rule=rule)
@@ -563,7 +568,7 @@ def _open_record(od: Any) -> Dict[str, Any]:
     objs = []
     for o in od.objects:
         objs.append({k: o.get(k) for k in ("source", "entry", "role", "url", "range", "anchor", "etag",
-                                            "last_modified", "rows", "rows_used", "truncated", "error")
+                                            "last_modified", "rows", "rows_used", "truncated", "consensus_identity", "error")
                      if o.get(k) is not None})
     return {"entries": od.entries, "objects": objs, "tables": od.tables, "uniparc": od.uniparc,
             "notes": od.notes, "sent": od.sent, "failed": od.failed, "unpublished": od.unpublished}

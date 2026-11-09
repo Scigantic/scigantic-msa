@@ -69,17 +69,21 @@ def test_litefold_entry_is_read_at_the_pinned_commit(hosts):
     assert m.provenance["organisms"]["litefold"] == ["Homo sapiens"]
 
 
+# A0A1A9ZI35 in UniProt; its published UniClust30 file starts with it.
+Q_A0A1A9ZI35 = ("MKCVLWVAEGSPTHSTPVRIEDPLQFVPPNTNPKEFKRVQQQIKENRRADKISAGPQSHILEGVTWDEANRIKDATVSSAGDHVVLVGAASKGIIQRGYQH"
+                "NATVYKAPYAKNPFDNVTDDELNEYKRTVERKKKSIHESEALSSQQTSGAQQHIKETTTTTTTTTAAVSQSEPEDVSDIILGLRISHLLFLFDAVSIQLL")
+
+
 def test_uniclust30_entries_are_found_from_uniparc_accessions(hosts):
-    hosts.uniparc[md5(Q_6T33)] = (["Q1", "P0DQ00"], [])
-    hosts.uniclust.add("P0DQ00")
-    a3m = REAL / "of3-6t33_A" / "cfdb_uniref30.a3m"
-    hosts.s.static["/uniclust30/P0DQ00/a3m/uniclust30.a3m"] = a3m.read_bytes()
-    m = MSA(server=None, quiet=True, uniparc=True).get(Q_6T33)
-    assert "uniclust30" in {r.extra["prov"].source for r in m.rows[1:]} or \
-        any(o["source"] == "uniclust30" for o in m.provenance["open"]["objects"])
+    hosts.uniparc[md5(Q_A0A1A9ZI35)] = (["Q1", "A0A1A9ZI35"], [("Glossina pallidipes", 7398)])
+    hosts.uniclust.add("A0A1A9ZI35")
+    a3m = REAL / "uniclust30-A0A1A9ZI35" / "uniclust30.a3m"
+    hosts.s.static["/uniclust30/A0A1A9ZI35/a3m/uniclust30.a3m"] = a3m.read_bytes()
+    m = MSA(server=None, quiet=True, uniparc=True).get(Q_A0A1A9ZI35)
+    assert {r.extra["prov"].source for r in m.rows[1:]} == {"uniclust30"} and m.depth > 100
     # The answer is cached: a second run probes nothing.
     n = hosts.s.count(lambda r: r.path_only.startswith("/uniclust30/") and r.method == "HEAD")
-    MSA(server=None, quiet=True, uniparc=True).get(Q_6T33)
+    MSA(server=None, quiet=True, uniparc=True).get(Q_A0A1A9ZI35)
     assert hosts.s.count(lambda r: r.path_only.startswith("/uniclust30/") and r.method == "HEAD") == n
 
 
@@ -154,8 +158,8 @@ def test_merge_drops_same_residues_and_same_entry_span_but_keeps_other_spans():
     assert "tr|P11111|X_HUMAN/40-59" in heads and "tr|Q22222|Y_MOUSE/1-20" in heads
     assert len(out) == 3
     assert cnt.same_residues == 1 and cnt.same_entry_span == 1 and cnt.query_copies == 1
-    # The server row took the open copy's species.
-    assert out[0].taxid == "9606"
+    # The server row keeps its own species (none); it never takes a copy's.
+    assert out[0].taxid is None and server[0].taxid is None
     assert "openfold3:uniprot" in out[0].extra["also"]
 
 
@@ -234,12 +238,12 @@ def test_server_pairs_first_then_only_new_species_from_open():
     assert "1 more by species from open data" in p.message
 
 
-def test_server_pairs_that_repeat_a_row_are_left_out():
+def test_server_pairs_that_repeat_a_row_in_one_chain_are_kept_but_repeated_pairs_are_not():
     qa, qb, sa, sb, oa, ob, merged = _pairs_fixture()
-    sa2 = [sa[0], Row("UniRef100_A9", sa[0].seq, "uniref")]
-    sb2 = [sb[0], Row("UniRef100_B9", "MNPQRSTVWE", "uniref")]
+    sa2 = [sa[0], Row("UniRef100_A9", sa[0].seq, "uniref"), Row("UniRef100_A8", sa[0].seq, "uniref")]
+    sb2 = [sb[0], Row("UniRef100_B9", "MNPQRSTVWE", "uniref"), Row("UniRef100_B8", "MNPQRSTVWE", "uniref")]
     plan = combine_pairs([qa, qb], merged, [oa, ob], ["A", "B"], server_pairs=[sa2, sb2], add_open=False)
-    assert plan.server_pairs == 1 and "1 more repeat a row" in plan.pairing.message
+    assert plan.server_pairs == 2 and "1 more repeat another pair" in plan.pairing.message
 
 
 def test_no_open_pairs_when_the_rule_says_no():

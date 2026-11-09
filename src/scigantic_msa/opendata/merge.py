@@ -5,7 +5,8 @@ Merge rules, in order:
 1. A row with the query's residues is dropped.
 2. Rows with the same residues (gaps removed) are one row. The first copy
    is kept: ColabFold rows come first, then open rows in source order. The
-   kept row gets the dropped copy's species when it had none.
+   kept row keeps its own species, or none: an environmental or
+   metagenomic row never takes the species of a copy from UniProt.
 3. Rows of the same sequence entry (same accession) that cover the same
    part of it are one row, and the copy with the most aligned residues is
    kept. "The same part" means the stated spans of the entry (``/12-200``
@@ -24,6 +25,7 @@ the server result is short.
 """
 from __future__ import annotations
 
+import dataclasses
 import random
 import re
 from collections import Counter
@@ -129,10 +131,18 @@ def _interleave(rows: Sequence[Row]) -> List[Row]:
     return out
 
 
+def _also(kept: Row, dropped: Row) -> None:
+    """Note on the kept copy (merge's own) where the dropped copy came from."""
+    p = dropped.extra.get("prov")
+    if p is not None:
+        kept.extra["also"] = set(kept.extra.get("also", ())) | {f"{p.source}:{p.role}"}
+
+
 def merge_rows(query: str, server: Sequence[Row], open_rows: Sequence[Row]) -> Tuple[List[Row], MergeCounts]:
     """The merged rows (query first) and what happened. ``server`` and
     ``open_rows`` exclude the query; every row should carry
-    ``extra['prov']``."""
+    ``extra['prov']``. The rows returned are copies; the input rows are
+    not changed."""
     cnt = MergeCounts(server_rows=len(server), open_rows_offered=len(open_rows))
     by_res: Dict[str, Row] = {}
     cands: List[Row] = []
@@ -144,14 +154,9 @@ def merge_rows(query: str, server: Sequence[Row], open_rows: Sequence[Row]) -> T
         old = by_res.get(k)
         if old is not None:
             cnt.same_residues += 1
-            p = r.extra.get("prov")
-            if p is not None:
-                old.extra.setdefault("also", set()).add(f"{p.source}:{p.role}")
-            if species_key(old) is None and species_key(r) is not None:
-                sk = species_key(r)
-                if sk and sk.startswith("tx:"):
-                    old.taxid = sk[3:]
+            _also(old, r)
             continue
+        r = dataclasses.replace(r, extra=dict(r.extra))
         by_res[k] = r
         cands.append(r)
     # Same entry, same part of it: keep the copy with the most residues.
@@ -176,9 +181,7 @@ def merge_rows(query: str, server: Sequence[Row], open_rows: Sequence[Row]) -> T
                 else:
                     same = _overlap(t[2], kk[2])
                 if same:
-                    p = cands[t[0]].extra.get("prov")
-                    if p is not None:
-                        cands[kk[0]].extra.setdefault("also", set()).add(f"{p.source}:{p.role}")
+                    _also(cands[kk[0]], cands[t[0]])
                     break
             if same:
                 drop.add(t[0])
@@ -292,33 +295,34 @@ def combine_pairs(queries: Sequence[str], merged: Sequence[Sequence[Row]], open_
     same length (None where a chain has no row). ``base``: pairs made
     another way when the server has no paired search. ``merged``: each
     chain's merged rows (query first), used to find the species of the
-    server's pairs. ``open_only``: each chain's open rows (query first),
-    the pool for extra pairs. ``add_open``: the organism rule's answer."""
+    server's pairs. ``open_only``: each chain's open rows as the merge kept
+    them (query first), the pool for extra pairs, so open pairs are rows of
+    the merged MSA. ``add_open``: the organism rule's answer."""
     nc = len(queries)
     rows: List[List[Optional[Row]]] = [[] for _ in range(nc)]
     keys: List[str] = []
     msg_parts: List[str] = []
     n_server = 0
     if server_pairs is not None:
-        # A pair whose row in some chain repeats an earlier pair's row (or
-        # the query) is dropped: Boltz and AlphaFold 3 drop repeated rows,
-        # which would leave the other chains' rows of that pair unpaired.
-        seen: List[Set[str]] = [{q} for q in queries]
+        # The server's pairs are kept as the server made them. Only a pair
+        # that repeats an earlier pair in every chain, or the query pair
+        # itself, is left out. A row that repeats in one chain stays:
+        # AlphaFold 3, ColabFold, OpenFold3, Protenix and Chai-1 keep it, and
+        # Boltz, which drops it, only loses that pair.
+        seen_pairs: Set[Tuple[Optional[str], ...]] = {tuple(queries)}
         total = len(server_pairs[0]) if server_pairs else 0
         for k in range(total):
             picked = [server_pairs[c][k] for c in range(nc)]
-            res = [ungapped(r.seq) if r is not None else None for r in picked]
-            if any(x is not None and x in seen[c] for c, x in enumerate(res)):
+            res = tuple(ungapped(r.seq) if r is not None else None for r in picked)
+            if all(x is None or x == q for x, q in zip(res, queries)) or res in seen_pairs:
                 continue
+            seen_pairs.add(res)
             for c in range(nc):
                 rows[c].append(picked[c])
-                x = res[c]
-                if x is not None:
-                    seen[c].add(x)
         n_server = len(rows[0])
         keys = [f"server:{k + 1}" for k in range(n_server)]
         msg_parts.append(f"{n_server} rows from the server's paired search"
-                         + (f" ({total - n_server} more repeat a row of another pair and are left out)"
+                         + (f" ({total - n_server} more repeat another pair or the query and are left out)"
                             if total > n_server else ""))
     elif base is not None and base.n_paired:
         n_server = base.n_paired
@@ -370,6 +374,8 @@ def combine_pairs(queries: Sequence[str], merged: Sequence[Sequence[Row]], open_
     who = _chains(list(names), [c for c in range(nc) if c not in lonely]) if len(lonely) < nc else ""
     if keys:
         msg = f"paired {len(keys)} rows across {who}: " + " and ".join(msg_parts)
+        if server_pairs is not None and n_server:
+            msg += ". The server's paired rows are written in addition to each chain's own rows"
     else:
         msg = "no paired rows; the chains get unpaired MSAs"
     if rule:

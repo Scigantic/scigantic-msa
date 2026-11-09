@@ -323,7 +323,11 @@ How an entry is found, with no index of ours:
   `alignment_db/alignment_db.index` (352 MB); files are read by byte range.
 - UniClust30: UniParc is asked by MD5 for the sequence's UniProtKB
   accessions, and up to 25 of them are tried as entries. This needs the
-  UniParc lookup, which is off with `--open-only`.
+  UniParc lookup, which is off with `--open-only`. Some UniClust30 files
+  start with a `_consensus` row and leave the cluster's representative
+  out; the consensus is in the representative's columns, so such a file is
+  used when the consensus is as long as the query and has the query's
+  residue at half its positions or more.
 
 Each table is downloaded once into the cache, with its URL, ETag, size and
 sha256 recorded, and kept as a small SQLite table keyed by the sha256 of
@@ -404,8 +408,11 @@ and `--open-only` then gives the query alone.
 
 With the ColabFold server, a complex gets the server's own paired search
 (`/ticket/pair` with greedy pairing, as `colabfold_batch` sends for a
-heteromer), and those pairs come first. Then pairs by species from the
-open rows are added, for species and entries the server's pairs do not
+heteromer), and those pairs come first. Every server pair is kept as the
+server made it, except a pair that repeats an earlier pair in every chain.
+Boltz reads a row that repeats an earlier row of the same chain only once,
+so such a pair is not paired in Boltz; the attribution file says how many.
+Then pairs by species from the open rows the merge kept are added, for species and entries the server's pairs do not
 already have, but only when the chains come from the same organism: every
 chain's organism must be known (from the UniProt entries that have exactly
 its sequence, OpenFold3 UniProt hits that are copies of it, or LiteFold for
@@ -420,13 +427,23 @@ families from one organism, and the open rows added species the server did
 not pair; for one human and snake toxin complex the open rows alone would
 have made 112 pairs where the server made 6.
 
+Chai-1 keeps at most 9,999 uniref90, 49,999 uniprot and 4,999 mgnify rows
+of a chain (its per-source quotas). Paired rows come first and the rest are
+in merge order, best first, so the weakest go; `prepare` says how many.
+
 Without a paired search (`--server nvidia`, or when it fails), the rows
 are paired by species as follows.
 
 Each chain gets its own unpaired MSA. Rows are paired across chains only
 where the rows say the species: an NCBI taxid (from ColabFold's taxonomy
-output, or `TaxID=` / `OX=` in headers) or a UniProt species code.
-Environmental and metagenomic hits have none and stay unpaired. When
+output, or `TaxID=` / `OX=` in headers) or a UniProt species code, and only
+when it names one species. A UniRef row names its cluster's common taxon,
+so it counts only for a cluster of one member (`n=1`). Taxa above species
+(root, Bacteria, Archaea, Eukaryota, Viruses, "unclassified ..." and
+metagenome names) and UniProt's virtual species codes, which start with 9
+(`9GAMM`, `9BACT`) and stand for many organisms, are not used.
+Environmental and metagenomic hits have none and stay unpaired: a row never
+takes the species of an identical row from another source. When
 pairing is not possible the tool says why, for example "no species is
 shared by any two chains; the chains get unpaired MSAs".
 
@@ -516,7 +533,9 @@ organisms found, the depth summary, and for a complex the number of server
 and open pairs and the rule that applied. It holds no local path and no
 server job id. Next to it, `scigantic-msa-rows/<seq_sha256>.<hash>.tsv`
 gives one line per row of each chain: its id, source, file kind, entry,
-the URL of the file and the row's position in it, its licence and which
+the URL of the file, the byte range read from it when only part was read
+(OpenProteinSet's shared `alignment_db` files), the row's position in that
+file or range, its licence and which
 other sources had the same row. When several jobs, models or runs write
 into one folder, the attribution file keeps one entry per write under
 `outputs`. A write replaces an older entry only when it rewrote all of
