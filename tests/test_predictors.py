@@ -365,3 +365,28 @@ def test_protenix_reads_each_jobs_own_alignment_of_a_sequence(tmp_path):
     res = {r["name"]: r for r in _run(py, "check_protenix.py", *jsons, env={"PROTENIX_ROOT_DIR": str(tmp_path / "px")})}
     assert res["x"]["paired_species"][0] == ["", "9606", "10090"]
     assert res["y"]["paired_species"][0] == ["", "7227", "4932"]
+
+
+def test_models_read_the_pairs_of_a_merged_complex(complex_server, hosts, tmp_path):
+    """Server pairs plus open species pairs, written for Boltz and Protenix,
+    pair the same rows in the models' own code."""
+    from conftest import md5
+    from scigantic_msa import MSA
+
+    hosts.uniparc[md5(Q_7M22A)] = (["P1"], [("Homo sapiens", 9606)])
+    hosts.uniparc[md5(Q_7M22C)] = (["P2"], [("Homo sapiens", 9606)])
+    chains = MSA(quiet=True).get([Q_7M22A, Q_7M22C], remote=True)
+    n = chains[0].complex_pairing.pairing.n_paired
+    assert n > 1
+    boltz_py, px_py = _py("SCIGANTIC_MSA_TEST_BOLTZ_PYTHON"), _py("SCIGANTIC_MSA_TEST_PROTENIX_PYTHON")
+    if not boltz_py and not px_py:
+        pytest.skip("set SCIGANTIC_MSA_TEST_BOLTZ_PYTHON or SCIGANTIC_MSA_TEST_PROTENIX_PYTHON")
+    if boltz_py:
+        res = _run(boltz_py, "check_boltz.py", *_msa_paths(Boltz.prepare(chains, out_dir=tmp_path / "b", quiet=True)))
+        assert len((set(res[0]["taxonomy"]) & set(res[1]["taxonomy"])) - {-1}) == n
+    if px_py:
+        p = tmp_path / "px.json"
+        p.write_text(json.dumps(Protenix.prepare(chains, out_dir=tmp_path / "p", name="px", quiet=True)))
+        r = _run(px_py, "check_protenix.py", p, env={"PROTENIX_ROOT_DIR": str(tmp_path / "root")})[0]
+        assert all(ch["query_row_matches"] for ch in r["chains"])
+        assert [ch["files"]["pairing.a3m"][1] for ch in r["chains"]] == [n + 1, n + 1]

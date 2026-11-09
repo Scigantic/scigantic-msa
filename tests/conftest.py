@@ -303,3 +303,101 @@ def no_open_hosts(monkeypatch):
     from scigantic_msa.opendata import net
 
     monkeypatch.setattr(net, "UNIPROT_SPACING", 0.0)
+
+
+# --------------------------------------------------------------------------- open data hosts
+
+import io  # noqa: E402
+import tarfile  # noqa: E402
+import urllib.parse  # noqa: E402
+
+from scigantic_msa.opendata import sources  # noqa: E402
+from scigantic_msa.remote.colabfold import ticket_id  # noqa: E402
+
+
+def md5(q):
+    return hashlib.md5(q.encode()).hexdigest().upper()
+
+
+COMMIT = sources.LITEFOLD_COMMIT
+LF_PATH = f"/datasets/{sources.LITEFOLD_REPO}/resolve/{COMMIT}"
+
+
+class OpenHosts:
+    """Every open data host on one fake server, with ETags, and UniParc
+    answers per sequence MD5."""
+
+    def __init__(self, server):
+        self.s = server
+        self.etag = {"fasta": "e1", "manifest": "m1"}
+        self.uniparc = {}
+        self.uniclust = set()
+        reps = "".join(f">{n}\n{q}\n" for n, q in (("6t33_A", Q_6T33), ("7m22_A", Q_7M22A), ("7m22_C", Q_7M22C),
+                                                     ("1abc_A", "ACGUACGUAC")))
+        self.fasta = reps.encode()
+        lf = REAL / "litefold-A0A096LP01" / "A0A096LP01.a3m"
+        self.manifest = ("acc\tentry\tgene\tlength\tsequence\ta3m_path\taf3_json_path\ta3m_bytes\taf3_json_bytes\n"
+                         f"A0A096LP01\tX_HUMAN\tX\t{len(Q_LITEFOLD)}\t{Q_LITEFOLD}\ta3m/A0A096LP01.a3m\t\t"
+                         f"{lf.stat().st_size}\t0\n").encode()
+        server.route("GET", "/msas/pdb_msas_completed_representives.fasta",
+                     lambda r: (200, {"ETag": f'"{self.etag["fasta"]}"'}, self.fasta))
+        server.route("HEAD", "/msas/pdb_msas_completed_representives.fasta",
+                     lambda r: (200, {"ETag": f'"{self.etag["fasta"]}"'}, self.fasta))
+        server.route("GET", f"{LF_PATH}/manifest.tsv", lambda r: (200, {"ETag": f'"{self.etag["manifest"]}"'}, self.manifest))
+        server.route("HEAD", f"{LF_PATH}/manifest.tsv", lambda r: (200, {"ETag": f'"{self.etag["manifest"]}"'}, self.manifest))
+        server.static[f"{LF_PATH}/a3m/A0A096LP01.a3m"] = lf.read_bytes()
+        for d, name in (("of3-6t33_A", "6t33_A"), ("of3-7m22_A", "7m22_A"), ("of3-7m22_C", "7m22_C")):
+            for f in (REAL / d).iterdir():
+                server.static[f"/msas/pdb_msas_completed/{name}/{f.name}"] = f.read_bytes()
+        server.route("GET", "/uniparc/search", self._uniparc)
+        server.route_prefix("HEAD", "/uniclust30/", lambda r: (200, {}, b"x") if r.path_only.split("/")[2] in self.uniclust
+                            else (404, {}, b""))
+        for k in sources.BASES:
+            sources.BASES[k] = server.url
+
+    def _uniparc(self, req):
+        qs = urllib.parse.parse_qs(req.query)
+        m = qs["query"][0].split(":", 1)[1]
+        res = self.uniparc.get(m)
+        body = {"results": [] if res is None else [{"uniParcId": "UPI0000000001", "uniProtKBAccessions": res[0],
+                                                     "organisms": [{"scientificName": n, "taxonId": t} for n, t in res[1]]}]}
+        return 200, {"X-UniProt-Release": "2026_04"}, json.dumps(body).encode()
+
+    def get_paths(self):
+        return [r.path for r in self.s.requests if r.method == "GET"]
+
+
+@pytest.fixture
+def hosts(server, monkeypatch):
+    for k in list(sources.BASES):
+        monkeypatch.setitem(sources.BASES, k, server.url)
+    return OpenHosts(server)
+
+
+def _pair_tar(qs, rows):
+    text = "\x00".join(f">{101 + c}\n{q}\n" + "".join(f">{h}\n{s}\n" for h, s in rows[c]) for c, q in enumerate(qs))
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        info = tarfile.TarInfo("pair.a3m")
+        info.size = len(text.encode())
+        tf.addfile(info, io.BytesIO(text.encode()))
+    return buf.getvalue()
+
+
+@pytest.fixture
+def complex_server(colabfold, hosts):
+    a_row, c_row = Q_7M22A[:-1] + ("A" if Q_7M22A[-1] != "A" else "G"), Q_7M22C[:-1] + ("A" if Q_7M22C[-1] != "A" else "G")
+    stub = ColabFoldStub(colabfold, {Q_7M22A: make_result_tar(Q_7M22A, [("UniRef100_S1", a_row, "9606")]),
+                                     Q_7M22C: make_result_tar(Q_7M22C, [("UniRef100_S2", c_row, "9606")])})
+    q = "".join(f">{101 + i}\n{s}\n" for i, s in enumerate((Q_7M22A, Q_7M22C)))
+    pid = ticket_id(q, "pairgreedy")
+    stub.by_id[pid] = _pair_tar([Q_7M22A, Q_7M22C], [[("UniRef100_S1", a_row)], [("UniRef100_S2", c_row)]])
+
+    def submit_pair(req):
+        stub.submitted.append(pid)
+        return 200, {}, json.dumps({"id": pid, "status": "COMPLETE"}).encode()
+
+    colabfold.route("POST", "/ticket/pair", submit_pair)
+    return stub
+
+
