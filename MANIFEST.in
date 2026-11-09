@@ -1,0 +1,3 @@
+# The tests run from an sdist: they need conftest.py and the fixtures.
+graft tests
+global-exclude __pycache__ *.py[cod]

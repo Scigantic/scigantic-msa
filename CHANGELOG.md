@@ -11,13 +11,35 @@ publishers put them:
 - LiteFold's human proteome MSAs (Hugging Face, CC BY 4.0, a pinned
   commit), found through its manifest;
 - OpenProteinSet UniClust30 MSAs (`s3://openfold`, CC BY 4.0), found by
-  asking UniParc for the accessions of the sequence's MD5;
+  asking UniParc for the accessions of the sequence's MD5 (not with
+  `--open-only`, see below);
 - with `--openproteinset`, OpenProteinSet's PDB MSAs, found through its
   chain table and `alignment_db.index` (about 610 MB the first time).
 
 Each table is downloaded once into the cache, with its ETag and sha256,
 checked again at most once a day, and named in the attribution file. The
-sequence is looked up on your machine; only its MD5 goes to UniProt.
+sequence is looked up on your machine and is never sent for open data.
+
+0.3.0 contacts the open data hosts by default, on every `run` that does
+not pass `--no-open`. On a cluster or a machine without internet access,
+pass `--no-open` or set `SCIGANTIC_MSA_NO_REMOTE=1`; tables and files
+already in the cache are still used then.
+
+Privacy of the open data lookup:
+
+- The hosts of the open data learn which public entries you asked for.
+- With a search server, the sequence's MD5 goes to UniParc (UniProt). With
+  `--open-only` (`MSA(server=None)`) it does not, unless you pass
+  `--uniparc` (`uniparc=True`): the MD5 of a close variant of a public
+  protein can be reversed by trying the variants. Without UniParc, the
+  organisms come from the open files alone and UniClust30 entries are not
+  used. `--no-uniparc` turns it off with a server too.
+- `run` says before a run which requests the lookup makes, and after it
+  what was sent where, including requests that failed. Under
+  `SCIGANTIC_MSA_NO_REMOTE` it says that only the cache is used.
+- The attribution file holds the sequence's sha256 and any near match's
+  entry and identity, which can also identify a close variant: treat it as
+  sensitive when the sequence is.
 
 Changes you may notice:
 
@@ -46,6 +68,46 @@ Changes you may notice:
   query, found with a local `mmseqs`.
 - Test only: `SCIGANTIC_MSA_TEST_COLABFOLD_REPLAY` reads saved ColabFold
   results from a folder instead of the server.
+- With `--open-only`, a run where open data could not be searched (no
+  network, a host failing, a table that cannot be downloaded) is an error
+  that names what failed, and writes nothing. A sequence no table holds is
+  still a warning only. An entry a table lists with no published files
+  says so.
+- `--openproteinset` asks before its first 610 MB download, and needs
+  `--yes` without a terminal.
+- `sources` prints the cache directory and says when a table in the cache
+  is damaged; `sources --fetch` builds it again. `sources --openproteinset`
+  needs `--fetch`.
+- `run` given an alignment file points to `convert`; Ctrl-C prints
+  "Interrupted."; processes waiting for another one's download say so.
+
+Downloads and the cache:
+
+- A download that ends early is read again and never kept: fewer bytes
+  than the server said, a Stockholm file without its closing `//`, or a
+  table with no length that stops inside a line. Only the row and size
+  caps cut a file, and those are marked `truncated: true`.
+- LiteFold files are read whole, not by the manifest's byte count, and a
+  manifest row with a bad byte count is skipped, not the whole table.
+- A web page sent in place of a table (a captive portal), or a table with
+  far fewer entries than the real one, is refused and not kept.
+- A damaged table in the cache (truncated, empty, unreadable) is removed
+  and built again. A damaged cached file or server result (one flipped
+  bit) is read as a miss and replaced.
+- A host name that does not resolve and a refused connection are not
+  retried, so an offline run fails in seconds. Each request has an overall
+  deadline, and a body that comes in too slowly is given up. A table that
+  failed is tried again after five minutes, not never in that process.
+- Two processes that need the same open file read it once; the second
+  waits for the first.
+- Without the cache (`--no-cache`, `cache=False`), the tables are
+  downloaded once per process, each `MSA` object's files are removed by
+  `close()` or a `with` block, and the temporary folder is removed on
+  SIGTERM too.
+- One `MSA` object can be used from several threads.
+- The cache's folders only lose group and other permissions; owner write
+  access you removed is not put back. Partial downloads are 0600.
+- The sdist includes the tests' `conftest.py` and fixtures.
 
 ## 0.2.9
 

@@ -17,6 +17,11 @@ With `--open-only` the sequence is not sent to any search server, which is
 the mode for unpublished sequences. There is no account and no login, and
 nothing is stored on our side.
 
+The open data lookup is on by default, so `run` contacts the open data
+hosts (two public S3 buckets and Hugging Face) even when the ColabFold
+server is your own. On a machine with no internet access, pass
+`--no-open` or set `SCIGANTIC_MSA_NO_REMOTE=1`.
+
 ## Install
 
 ```
@@ -39,17 +44,34 @@ Your sequence may be unpublished, so read this before you run a search.
   knows the sequence can download the result. Treat a submission there as
   publishing the sequence. For a complex, the chains are also sent together
   once more, for the server's paired search.
-- The open data lookup sends no sequence. Each set's table of sequences is
-  downloaded once and the sequence is looked up on your machine. The MD5 of
-  the sequence (UniProt's own sequence checksum) is sent to
-  rest.uniprot.org to find which UniProt entries, and so which organisms,
-  have exactly this sequence. If a table holds the sequence, the public
-  files of that entry are then read from their publisher, which tells the
-  publisher which public entry you matched, and UniProt accessions of the
-  sequence are tried as OpenProteinSet UniClust30 entries.
+- The open data lookup never sends the sequence. Each set's table of
+  sequences is downloaded once and the sequence is looked up on your
+  machine. If a table holds the sequence, the public files of that entry
+  are then read from their publisher. So the publisher's host learns which
+  public entry you asked for, and so that you hold that sequence or one
+  identical to it.
+- With a search server, the lookup also sends the MD5 of the sequence
+  (UniProt's own sequence checksum) to rest.uniprot.org, to find which
+  UniProt entries, and so which organisms, have exactly this sequence, and
+  tries up to 25 of their accessions as OpenProteinSet UniClust30 entries
+  on openfold.s3.amazonaws.com. The MD5 of a sequence close to a public
+  one can be reversed: a point mutant of a known protein can be found from
+  its MD5 by trying the variants. So with `--open-only` this UniParc
+  lookup is off unless you pass `--uniparc` (`MSA(server=None, uniparc=True)`).
+  Without it, the organisms of a chain come only from the open files
+  themselves (OpenFold3's UniProt hits, LiteFold for human proteins), which
+  matters for pairing a complex, and UniClust30 entries are not used.
+  `--no-uniparc` turns it off with a server too.
 - `--open-only` (`MSA(server=None)` in Python) does the open data lookup and
   nothing else: no search server receives the sequence, and there is
-  nothing to confirm. The command line says what was sent where.
+  nothing to confirm. Before a run the command line says which requests
+  the lookup makes, and after it, what was sent where, including requests
+  that failed.
+- The attribution file written next to the model's input holds the
+  sequence's sha256 (`seq_sha256`) and, for a `--near` match, the public
+  entry and its identity to the query. Like the MD5, these can identify a
+  close variant of a public protein, so treat the file as sensitive when the
+  sequence is.
 - The Python API refuses to send anything to a search server unless you
   pass `remote=True`. Constructing a client yourself (`ColabFoldClient(...).search(seq)`, or
   `NvidiaClient`) is that same choice made in code, so it sends without
@@ -65,10 +87,13 @@ Your sequence may be unpublished, so read this before you run a search.
   `~/.cache/scigantic-msa` (on Windows, `%LOCALAPPDATA%\scigantic-msa\cache`,
   when `LOCALAPPDATA` is absolute). `scigantic-msa cache` prints the one in
   use. Delete it to forget them, or pass `--no-cache` (open data then goes
-  to a temporary folder removed at exit). Only you can read its
+  to a temporary folder: the tables are kept there for the life of the
+  process, the files read for each `MSA` object are removed by `close()`,
+  and the folder is removed at exit or on SIGTERM). Only you can read its
   files or list its folders, which are named by a hash of the sequence; a
   cache made by 0.2.7 or older is made so the first time it is used, even
-  only to read it. If the cache
+  only to read it. The tool only ever removes group and other permissions
+  there; it never gives you back write access you took away. If the cache
   directory cannot be written (read-only home, say), the tool warns once
   and runs without it.
 - `SCIGANTIC_MSA_NO_REMOTE=1` blocks all network traffic, whatever the code
@@ -94,10 +119,11 @@ scigantic-msa run SEQ_OR_FASTA --model boltz --out job/ --open-only
 scigantic-msa run chains.fasta --complex --model af3 --out job/ --yes
 scigantic-msa run many.fasta --batch --model boltz --out jobs/
 scigantic-msa convert my_alignment.a3m --model protenix --out job/
-scigantic-msa sources      # the open data sets, their terms, and the tables in the cache
-scigantic-msa sources --fetch   # download the tables now (67 MB)
+scigantic-msa sources      # the cache, the open data sets, their terms, and the tables in the cache
+scigantic-msa sources --fetch   # download the tables now (67 MB to download, about 96 MB on disk)
+scigantic-msa sources --fetch --openproteinset   # also the OpenProteinSet tables (about 610 MB)
 scigantic-msa cache        # prints the cache directory
-scigantic-msa --version
+scigantic-msa version      # or --version
 ```
 
 `--model` is one of `af3`, `boltz`, `chai`, `colabfold`, `openfold3`,
@@ -133,7 +159,10 @@ Options for the open data part of `run`:
 - `--no-open`: the server's result alone, as in 0.2.
 - `--openproteinset`: also OpenProteinSet's PDB alignments (2021 searches
   of BFD, UniClust30, UniRef90 and MGnify). Its tables are about 610 MB the
-  first time, so it is off by default.
+  first time, so it is off by default, and `run` asks before that download
+  (`--yes` skips the question; without a terminal, `--yes` is needed).
+- `--uniparc` / `--no-uniparc`: send the sequence's MD5 to UniParc, or not
+  (see Privacy). On by default, off with `--open-only`.
 - `--near`: also entries at 95% identity or more over 90% of the query,
   such as another construct of the same protein. Needs an `mmseqs` binary
   on PATH; the search runs on your machine.
@@ -141,12 +170,20 @@ Options for the open data part of `run`:
 
 Before sending, `run` says how many sequences go to which server, and for
 a complex or batch, how many chains or jobs, and what the open data lookup
-sends. After writing, `run` and `convert` print the depth of each chain's
-alignment: rows, an estimated Neff at 80% identity and species, for the
-merged MSA and for the server's result alone, and how many rows each open
-set added. They warn when it is shallow or holds only the query, which
-makes the model run in single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
+sends. After writing, `run` prints each chain's depth. With open data it
+gives rows, an estimated Neff at 80% identity and species, for the merged
+MSA and for the server's result alone, and how many rows each open set
+added; `convert` and `run --no-open` give the number of sequences. Both
+warn when the alignment is shallow or holds only the query, which makes
+the model run in single-sequence mode. If you stop `run` with Ctrl-C while it waits, run the
 same command again: it picks up the same job without sending it again.
+
+With `--open-only`, a run where the open data could not be searched (no
+network, a host that fails, a table that cannot be downloaded) ends with
+an error that names what failed, and writes nothing, rather than a query
+only MSA. A sequence that no table holds is not an error: it gets the
+query alone and a warning. An entry a table lists but whose files are not
+published says so.
 
 `--host` takes an `http://` or `https://` URL in ASCII with no spaces,
 backslash, user name or password, query or fragment, and so do
@@ -198,8 +235,14 @@ print(merged.provenance["depth"], merged.provenance["merge"])
 ```
 
 `MSA(open_data=False)` gives the server's result alone. `openproteinset`,
-`near` and `open_pairs` match the command line options. Each row has
+`near`, `open_pairs` and `uniparc` match the command line options
+(`uniparc` defaults to off with `server=None`). Each row has
 `row.extra["prov"]`, a `Prov(source, role, entry, url, record, anchor)`.
+`merged.provenance["open"]` records what the lookup sent (`sent`), what
+it could not search or read (`failed`) and the entries listed but not
+published (`unpublished`). One `MSA` object can be used from several
+threads. With `cache=False`, use it in a `with` block, or call `close()`,
+to remove the files it read.
 
 ### Adapters directly
 
@@ -279,18 +322,28 @@ How an entry is found, with no index of ours:
 - OpenProteinSet: `data_caches/chain_data_cache.json` (256 MB) and
   `alignment_db/alignment_db.index` (352 MB); files are read by byte range.
 - UniClust30: UniParc is asked by MD5 for the sequence's UniProtKB
-  accessions, and up to 25 of them are tried as entries.
+  accessions, and up to 25 of them are tried as entries. This needs the
+  UniParc lookup, which is off with `--open-only`.
 
 Each table is downloaded once into the cache, with its URL, ETag, size and
 sha256 recorded, and kept as a small SQLite table keyed by the sha256 of
-the sequence. Its ETag is checked at most once a day
+the sequence. A download is kept only when it is whole and is the table it
+should be: a web page sent in its place (a captive portal, say) or a cut
+download is refused, and a table whose file is damaged is built again.
+Its ETag is checked at most once a day
 (`SCIGANTIC_MSA_OPEN_REFRESH_HOURS`) and a changed table is downloaded
 again. The table versions used are named in the attribution file. Files of
 matched entries are kept in the cache as parsed rows. A file is read until
 its 50,000th row or 256 MB, whichever comes first (OpenFold3's
 `uniprot_hits.sto` files reach 2.9 GB); their rows are ordered best hit
 first, so a cut drops the weakest hits. A file whose first row is not the
-sequence is refused; a single broken row is dropped and counted.
+sequence is refused; a single broken row is dropped and counted. A file
+that ends early (fewer bytes than the server said, or a Stockholm file
+without its closing `//`) is read again and never kept; only the cap above
+cuts a file, and the attribution file then says `truncated: true`. A host
+that does not resolve or refuses the connection is not tried again, each
+request has an overall deadline, and a table that failed is tried again
+after five minutes.
 
 Merging, for each chain:
 
