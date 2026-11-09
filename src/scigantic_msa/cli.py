@@ -315,6 +315,24 @@ def _depths(chains: List[Alignment], quiet: bool, job: Optional[str] = None) -> 
                   "MSA are often poor.", file=sys.stderr)
 
 
+def _sent(chains: List[Alignment], quiet: bool) -> None:
+    """Say what the open data lookups of this job sent, and where."""
+    if quiet:
+        return
+    sent: List[str] = []
+    looked = False
+    for c in chains:
+        o = c.provenance.get("open")
+        if isinstance(o, dict):
+            looked = True
+            for x in o.get("sent") or []:
+                if x not in sent:
+                    sent.append(x)
+    if looked:
+        print("open data sent: " + ("; ".join(sent) if sent else "nothing (tables, answers and files came from the cache)"),
+              file=sys.stderr)
+
+
 def _ent_names(ents) -> List[str]:
     from .adapters import chain_id
 
@@ -455,6 +473,7 @@ def cmd_run(a: argparse.Namespace) -> int:
                 continue
             _report(files, nxt, a.quiet)
             _depths(got, a.quiet, name if a.batch else None)
+            _sent(got, a.quiet)
     except (RemoteError, RemoteNotAllowed, A3MError, PrepareError, ImportError, OSError, ValueError) as e:
         return die(str(e))
     except KeyboardInterrupt:

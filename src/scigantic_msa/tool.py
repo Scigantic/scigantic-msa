@@ -482,7 +482,7 @@ def _open_record(od: Any) -> Dict[str, Any]:
                                             "last_modified", "rows", "rows_used", "truncated", "error")
                      if o.get(k) is not None})
     return {"entries": od.entries, "objects": objs, "tables": od.tables, "uniparc": od.uniparc,
-            "notes": od.notes}
+            "notes": od.notes, "sent": od.sent}
 
 
 def _open_attribution(od: Any, counts: Any) -> List[Dict[str, Any]]:

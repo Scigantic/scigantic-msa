@@ -415,6 +415,9 @@ def test_open_only_run_from_the_command_line(hosts, tmp_path, capsys, monkeypatc
     err = capsys.readouterr().err
     assert "not sent to any search server" in err and "MD5" in err
     assert "rows from open data" in err
+    assert "open data sent: the MD5 of the sequence to" in err
+    assert main(["run", Q_6T33, "-m", "colabfold", "-o", str(tmp_path), "--open-only"]) == 0
+    assert "open data sent: nothing" in capsys.readouterr().err
     assert all(not r.path_only.startswith("/ticket") for r in hosts.s.requests)
 
 
@@ -524,3 +527,14 @@ def test_openproteinset_entries_are_read_by_byte_range(hosts):
     assert roles == {"uniref90", "bfd_uniclust", "mgnify"}
     ranged = [r for r in hosts.s.requests if r.path_only.endswith("alignment_db_3.db")]
     assert ranged and all(r.headers.get("Range", "").startswith("bytes=") for r in ranged)
+
+
+def test_sources_command_lists_sets_and_fetches_tables(hosts, capsys):
+    assert main(["sources"]) == 0
+    out = capsys.readouterr().out
+    assert "openfold3: OpenFold3 training MSAs for PDB chains, CC-BY-4.0" in out
+    assert "table openfold3: not downloaded" in out and "UniClust30: not confirmed" in out
+    assert main(["sources", "--fetch"]) == 0
+    out = capsys.readouterr().out
+    assert "table openfold3: 3 sequences" in out and "table litefold: 1 sequences" in out
+    assert "table openproteinset: not downloaded" in out
