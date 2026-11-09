@@ -5,13 +5,22 @@ these parsers drop a bad row and count it: published files are large and
 now and then hold a broken record, and losing one row is better than losing
 the file. The query row is still checked strictly: the first record that is
 not a ``_consensus`` record must be exactly the expected sequence, or the
-whole file is refused.
+whole file is refused (for the one exception, see the UniClust30 layout
+below).
 
 Each parser returns a :class:`Parsed`: rows as (header, A3M row, record)
 with the query first, where record is the 0-based position in the file
 (headers are not always unique), plus counts of what was skipped and why.
 Rows that are copies of the query are not kept, but their headers are, since
 they name organisms that have this exact sequence.
+
+UniClust30 files come in two layouts. Most start with the cluster's
+representative. Some start with a ``>ACC_consensus`` row instead and leave
+the representative out; the consensus is in the representative's columns.
+With ``consensus_frame=True`` such a file is read when its consensus has
+the query's length and at least ``CONSENSUS_MIN_IDENTITY`` of the query's
+residues at the same positions (a shifted or different sequence gets about
+5%); the consensus row is dropped and the query row stands in for it.
 
 Files are read line by line and can be cut off after ``max_rows`` rows or
 ``max_bytes`` bytes. Rows in these files are ordered best hit first, so a
@@ -26,6 +35,9 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 __all__ = ["Parsed", "SourceMismatch", "parse_a3m_lines", "parse_sto_lines"]
 
 ALLOWED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-")
+#: Least share of query positions where a consensus row must have the
+#: query's residue to stand for it.
+CONSENSUS_MIN_IDENTITY = 0.5
 
 
 class SourceMismatch(ValueError):
@@ -39,6 +51,9 @@ class Parsed:
     query_copies: List[str] = field(default_factory=list)
     truncated: bool = False
     bytes_read: int = 0
+    #: For a file read through its consensus row: that row's identity to
+    #: the query, else None.
+    consensus_identity: Optional[float] = None
 
 
 def match_length(row: str) -> int:
@@ -89,30 +104,58 @@ def _accept(p: Parsed, header: str, seq: str, query: str, rec: int) -> None:
         p.rows.append((header, seq, rec))
 
 
+def _consensus_identity(seq: str, query: str) -> Optional[float]:
+    """Share of query positions where a consensus row has the query's
+    residue, or None when it is not a row of the query's length without
+    insertions."""
+    if len(seq) != len(query) or set(seq) - ALLOWED or any(c.islower() for c in seq):
+        return None
+    return sum(a == b for a, b in zip(seq, query)) / max(len(query), 1)
+
+
 def parse_a3m_lines(lines: Iterable[bytes], query: str, *, max_rows: Optional[int] = None,
-                    max_bytes: Optional[int] = None) -> Parsed:
-    """A3M, one or several blocks (ColabFold writes NUL between blocks)."""
+                    max_bytes: Optional[int] = None, consensus_frame: bool = False) -> Parsed:
+    """A3M, one or several blocks (ColabFold writes NUL between blocks).
+    ``consensus_frame``: read a UniClust30 file whose first record is a
+    consensus with no representative after it (see the module notes)."""
     src = _Counter(lines, max_bytes)
     p = Parsed([])
     first = True
     rec = -1
     name: Optional[str] = None
     parts: List[str] = []
+    cons: Optional[Tuple[str, str, int]] = None
+
+    def use_consensus() -> None:
+        nonlocal first
+        assert cons is not None
+        ident = _consensus_identity(cons[1], query)
+        if ident is None or ident < CONSENSUS_MIN_IDENTITY:
+            what = "not as long as the query" if ident is None else f"{ident:.0%} identical to the query"
+            raise SourceMismatch(f"first record {cons[0][:40]!r} is a consensus {what}, and no record "
+                                 "after it is the expected query")
+        p.rows.append((cons[0].lstrip(">")[: -len("_consensus")], query, cons[2]))
+        p.consensus_identity = round(ident, 4)
+        first = False
 
     def flush() -> bool:
-        nonlocal first
+        nonlocal first, cons
         assert name is not None
+        seq = "".join(parts)
         if _is_consensus(name):
             p.skipped["consensus_record"] += 1
+            if first and cons is None:
+                cons = (name.split()[0], seq, rec)
             return True
-        seq = "".join(parts)
         if first:
-            if seq != query:
+            if seq == query:
+                p.rows.append((name, seq, rec))
+                first = False
+                return True
+            if not (consensus_frame and cons is not None):
                 raise SourceMismatch(f"first record {name[:40]!r} is not the expected query "
                                      f"(length {len(seq)} vs {len(query)})")
-            p.rows.append((name, seq, rec))
-            first = False
-            return True
+            use_consensus()
         _accept(p, name, seq, query, rec)
         return max_rows is None or len(p.rows) - 1 < max_rows
 
@@ -133,6 +176,8 @@ def parse_a3m_lines(lines: Iterable[bytes], query: str, *, max_rows: Optional[in
             flush()
     p.truncated = p.truncated or src.cut
     p.bytes_read = src.n
+    if first and consensus_frame and cons is not None:
+        use_consensus()
     if first:
         raise SourceMismatch("no query record")
     return p

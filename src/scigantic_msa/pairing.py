@@ -2,10 +2,13 @@
 species.
 
 A row's species comes from an NCBI taxid (ColabFold taxonomy output,
-``TaxID=`` or ``OX=`` in the header) or a UniProt species mnemonic. UniRef90
-rows for clusters with more than one member carry the cluster's common taxon,
-not a species, and are never used. Environmental and metagenomic rows have no
-species and stay unpaired.
+``TaxID=`` or ``OX=`` in the header) or a UniProt species mnemonic, and only
+a species-level one counts (see :func:`scigantic_msa.alignment.species_key`).
+UniRef rows for clusters with more than one member carry the cluster's
+common taxon, not a species, and are never used; nor are taxa such as
+Bacteria or "unclassified Deltaproteobacteria", or UniProt's virtual codes
+such as ``9GAMM``. Environmental and metagenomic rows have no species and
+stay unpaired.
 
 Every species found in two or more chains is paired: each chain that has
 it gives its best (first) row of that species, and a chain without it gets
@@ -23,7 +26,7 @@ from typing import Dict, List, Optional, Sequence
 from .a3m import Row, ungapped
 from .alignment import Alignment, species_key
 
-__all__ = ["Pairing", "pair_by_species", "ComplexPairing", "pairing_for"]
+__all__ = ["Pairing", "pair_by_species", "ComplexPairing", "pairing_for", "complex_pairing_of"]
 
 
 @dataclass
@@ -44,8 +47,9 @@ class Pairing:
 
 def _pool(msa: Alignment) -> List[Row]:
     """Candidate rows for pairing. Rows with the same residues as the query or
-    as an earlier row are left out: they add nothing, and Boltz and AlphaFold 3
-    drop repeated rows, which would silently break the pair."""
+    as an earlier row are left out: they add nothing to a species' best row,
+    and Boltz drops a row that repeats an earlier one, which would lose the
+    pair there."""
     src = msa.uniprot_rows if msa.uniprot_rows and len(msa.uniprot_rows) > 1 else msa.rows
     seen = {msa.query}
     out = []
@@ -145,15 +149,24 @@ def pairing_for(msas: Sequence[Alignment], names: Optional[Sequence[str]] = None
     """The pairs the writers use for these distinct chains: the complex's
     own pairs when every chain carries the same :class:`ComplexPairing` for
     exactly these sequences, else :func:`pair_by_species`."""
-    cp = getattr(msas[0], "complex_pairing", None) if msas else None
-    if (isinstance(cp, ComplexPairing) and all(getattr(m, "complex_pairing", None) is cp for m in msas)
-            and sorted(cp.queries) == sorted(m.query for m in msas) and len(cp.queries) == len(msas)):
+    cp = complex_pairing_of(msas)
+    if cp is not None:
         pos = [cp.queries.index(m.query) for m in msas]
         p = cp.pairing
         rows = [p.rows[i] for i in pos]
         without = [c for c, i in enumerate(pos) if i in p.chains_without_species]
         return Pairing(rows, list(p.keys), without, p.message)
     return pair_by_species(msas, max_pairs=max_pairs, names=names)
+
+
+def complex_pairing_of(msas: Sequence[Alignment]) -> Optional[ComplexPairing]:
+    """The :class:`ComplexPairing` every one of these distinct chains
+    carries for exactly these sequences, or None."""
+    cp = getattr(msas[0], "complex_pairing", None) if msas else None
+    if (isinstance(cp, ComplexPairing) and all(getattr(m, "complex_pairing", None) is cp for m in msas)
+            and sorted(cp.queries) == sorted(m.query for m in msas) and len(cp.queries) == len(msas)):
+        return cp
+    return None
 
 
 def _count(label: Sequence[str], idx: Sequence[int]) -> int:

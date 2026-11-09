@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .a3m import A3MError, Row, format_a3m, match_length, parse_a3m, parse_colabfold_complex
 from .alignment import Alignment, species_key
-from .pairing import ComplexPairing, Pairing, pairing_for
+from .pairing import ComplexPairing, Pairing, complex_pairing_of, pairing_for
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256
 from . import writers
 
@@ -111,12 +111,15 @@ def _chain_names(chains: Sequence[Alignment]) -> List[str]:
 
 def _pairing_note(chains: Sequence[Alignment], quiet: bool) -> Optional[Pairing]:
     """Pair the distinct sequences of ``chains`` and say how it went, naming
-    chains by id, including any chain left unpaired."""
+    chains by id, including any chain left unpaired. The pairs of
+    ``MSA().get([...])`` were already reported there, so they are not
+    reported again."""
     msas = [m for m, _ in _distinct(chains)]
     if len(msas) < 2:
         return None
     pr = pairing_for(msas, names=_chain_names(chains))
-    _say(pr.message, quiet)
+    if complex_pairing_of(msas) is None:
+        _say(pr.message, quiet)
     return pr
 
 
@@ -306,6 +309,15 @@ class Chai:
         written = writers.write_chai(chains, d, pairing=pr)
         import pyarrow.parquet as pq
 
+        names = _chain_names(chains)
+        for i, (_m, idx) in enumerate(_distinct(chains)):
+            t = pq.read_table(written[idx[0]], columns=["source_database", "pairing_key"])
+            what = "the sequence" if len(chains) == 1 else (
+                ("chains " if ", " in names[i] else "chain ") + names[i])
+            note = writers.chai_quota_note(t.column("source_database").to_pylist(),
+                                           t.column("pairing_key").to_pylist(), what)
+            if note:
+                _say("warning: " + note, quiet)
         for m, p in zip(chains, written):
             if p.name != writers.chai_expected_basename(m.query) or not p.is_file():
                 raise PrepareError(f"Chai: {p.name} is not the file Chai-1 looks for")

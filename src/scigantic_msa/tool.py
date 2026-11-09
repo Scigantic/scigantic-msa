@@ -402,6 +402,7 @@ class MSA:
     def _pair(self, qs: List[str], names: List[str], out: Dict[str, Alignment], server: Dict[str, Alignment],
               opened: Dict[str, Any]) -> None:
         from .opendata.merge import combine_pairs, organism_rule
+        from .opendata.sources import SOURCES as OPEN_SETS
 
         sp = self._server_pairs(qs, names)
         if sp is not None:
@@ -425,7 +426,11 @@ class MSA:
                 add_open, rule = organism_rule([opened[q].species() for q in qs], names)
                 if add_open:
                     rule = "extra species pairs from open data are added because " + rule
-        open_rows = [[Row("query", q, "query")] + (opened[q].rows if q in opened else []) for q in qs]
+        # The pool for open pairs is the open rows the merge kept, so a pair
+        # never brings back a copy the merge dropped.
+        open_rows = [[Row("query", q, "query")]
+                     + [r for r in out[q].rows[1:] if getattr(r.extra.get("prov"), "source", None) in OPEN_SETS]
+                     for q in qs]
         plan = combine_pairs(qs, [out[q].rows for q in qs], open_rows, names,
                              server_pairs=sp.rows if sp is not None else None, base=base,
                              add_open=add_open and bool(opened), rule=rule)

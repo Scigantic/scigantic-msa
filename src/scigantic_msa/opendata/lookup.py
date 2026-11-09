@@ -320,6 +320,8 @@ class OpenData:
             return
         rec.update({k: meta.get(k) for k in ("etag", "last_modified", "bytes_read", "truncated", "fetched_at",
                                              "from_cache")})
+        if meta.get("consensus_identity") is not None:
+            rec["consensus_identity"] = meta["consensus_identity"]
         rec["rows"] = len(parsed.rows) - 1
         rec["skipped"] = dict(parsed.skipped)
         cmap = e.cmap if e.cmap is not None else identity_map(len(e.seq))
@@ -379,10 +381,14 @@ class OpenData:
                                                  reopen=lambda: _reread(f.url, headers),
                                                  size=int(clen) if clen and clen.isdigit() else None)
                     else:
-                        parsed = parse_a3m_lines(lines, seq, max_rows=self.max_rows, max_bytes=cap)
-                    meta = {"url": f.url, "etag": net.etag_of(h), "last_modified": h.get("last-modified"),
-                            "bytes_read": parsed.bytes_read, "truncated": parsed.truncated,
-                            "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                        parsed = parse_a3m_lines(lines, seq, max_rows=self.max_rows, max_bytes=cap,
+                                                 consensus_frame=f.role == "uniclust30")
+                    meta: Dict[str, Any] = {
+                        "url": f.url, "etag": net.etag_of(h), "last_modified": h.get("last-modified"),
+                        "bytes_read": parsed.bytes_read, "truncated": parsed.truncated,
+                        "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+                    if parsed.consensus_identity is not None:
+                        meta["consensus_identity"] = parsed.consensus_identity
                     if f.length is not None and not parsed.truncated and parsed.bytes_read != f.length:
                         raise ConnectionError(f"read {parsed.bytes_read} of {f.length} bytes")
                 break

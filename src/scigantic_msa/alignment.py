@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from .a3m import A3MError, Row, classify_header, format_a3m, parse_a3m, ungapped
 from .seqkey import canonical_sequence, seq_sha256
 
-__all__ = ["Alignment", "SOURCES", "classify_header", "species_key"]
+__all__ = ["Alignment", "SOURCES", "classify_header", "species_key", "NOT_SPECIES_TAXIDS"]
 
 #: Where a result came from: a search server just now, this machine's cache
 #: of an earlier search, an alignment file you passed in, a server search
@@ -19,31 +19,52 @@ SOURCES = ("remote", "cache", "file", "merged", "open")
 
 _TAXID = re.compile(r"(?:\bTaxID=|\bOX=)(\d+)")
 _UNIREF_N = re.compile(r"\bn=(\d+)\b")
+_UNIREF_ROW = re.compile(r"^UniRef(?:100|90|50)_")
 _UNIPROT = re.compile(r"^(?:tr|sp)\|[A-Za-z0-9]{6,10}(?:_\d)?\|[A-Za-z0-9]+_([A-Za-z0-9]{1,5})(?:_\d+)?$")
+_TAX_NAME = re.compile(r"\b(?:Tax|OS)=(.+?)(?:\s+(?:TaxID|OX|GN|PE|SV|RepID)=|$)")
+
+#: NCBI taxa that are never one species: root, cellular organisms, the
+#: three domains, viruses, unclassified and other sequences, synthetic
+#: construct and unidentified.
+NOT_SPECIES_TAXIDS = frozenset({"1", "131567", "2", "2157", "2759", "10239", "12908", "28384", "32630", "32644"})
 
 
 _TAXIDS_LINE = "#scigantic-msa-taxids "
 
 
+def _not_a_species_name(header: str) -> bool:
+    m = _TAX_NAME.search(header)
+    if not m:
+        return False
+    name = m.group(1).strip().lower()
+    return name.startswith("unclassified") or "environmental samples" in name or "metagenome" in name
+
+
 def species_key(row: Row) -> Optional[str]:
     """A key that is equal for rows from the same species, or None.
 
-    UniRef90 rows carry the cluster's common taxon; it is only a species when
-    the cluster has one member (n=1), so larger clusters give None.
+    Only species-level keys count. A UniRef row (UniRef100, 90 or 50) names
+    the common taxon of its cluster, which is one organism only when the
+    cluster has one member (n=1), so larger clusters give None. Taxa that
+    group many organisms (the domains, root, viruses, "unclassified ..."
+    names, metagenomes) give None, and so do UniProt's virtual species
+    codes, which all start with 9 (``_9BACT``, ``_9GAMM``) and stand for a
+    group of organisms, not one.
     """
-    taxid = row.taxid
-    if taxid is None:
-        m = _TAXID.search(row.header)
-        taxid = m.group(1) if m else None
+    m = _TAXID.search(row.header)
+    taxid = row.taxid or (m.group(1) if m else None)
+    if m and _UNIREF_ROW.match(row.header):
+        # The header's taxon is the cluster's; one member makes it a species.
+        n = _UNIREF_N.search(row.header)
+        if not n or n.group(1) != "1":
+            return None
     if taxid is not None:
-        if row.header.startswith("UniRef90_"):
-            n = _UNIREF_N.search(row.header)
-            if not n or n.group(1) != "1":
-                return None
+        if taxid in NOT_SPECIES_TAXIDS or _not_a_species_name(row.header):
+            return None
         return "tx:" + taxid
     first = row.header.split(None, 1)[0].partition("/")[0] if row.header.strip() else ""
     m = _UNIPROT.match(first)
-    if m:
+    if m and not m.group(1).startswith("9"):
         return "mn:" + m.group(1)
     return None
 

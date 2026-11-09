@@ -28,9 +28,11 @@ def mut(q, k, to="A"):
 
 
 def aln(q, taxids, tag, extra=0):
-    """Hit i has taxid taxids[i]; ``extra`` more hits have no species."""
+    """Hit i has taxid 1000 + taxids[i] (1 and 2 are not species);
+    ``extra`` more hits have no species."""
     rows = [Row("101", q, "query")]
     for i, t in enumerate(taxids):
+        t = f"1000{t}"
         rows.append(Row(f"UniRef100_{tag}{i}\t{t}", mut(q, 2 + i), "uniref", t))
     for j in range(extra):
         rows.append(Row(f"env_{tag}{j}", mut(q, 2 + len(taxids) + j, "W"), "env"))
@@ -70,7 +72,7 @@ def test_af3_shallow_chain_paired_row_stays_at_its_index(tmp_path):
     c = aln(QC, ["3"], "c")  # shares only species 3, with B
     chains = [a, b, c]
     pr = pair_by_species(chains)
-    assert pr.keys == ["tx:1", "tx:2", "tx:3"]
+    assert pr.keys == ["tx:10001", "tx:10002", "tx:10003"]
     write_model("af3", chains, tmp_path, name="j", quiet=True)
     doc = json.loads((tmp_path / "af3" / "j.json").read_text())
     rows = check_af3_alignment(doc, chains, pr)

@@ -36,7 +36,8 @@ def build(spec, spare, L=30, seed=0):
                     return s
 
         for t in taxa:
-            rows.append(Row(f"UniRef100_{c}{t}\t{t}", mk(), "uniref", str(t)))
+            # 1000 + t: taxids 1 and 2 are not species.
+            rows.append(Row(f"UniRef100_{c}{t}\t{t}", mk(), "uniref", f"1000{t}"))
         for k in range(spare.get(c, 0)):
             rows.append(Row(f"env_{c}{k}", mk(), "env"))
         out.append(Alignment(query=q, rows=rows, source="remote", provenance={}))
