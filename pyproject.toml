@@ -22,6 +22,8 @@ classifiers = [
   "Environment :: Console",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
   "Typing :: Typed",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
 ]
 dependencies = []
 
@@ -34,6 +36,7 @@ dev = ["pytest>=7", "pyarrow>=12", "mypy>=1.10", "ruff>=0.5"]
 Homepage = "https://github.com/Scigantic/scigantic-msa"
 Repository = "https://github.com/Scigantic/scigantic-msa"
 Issues = "https://github.com/Scigantic/scigantic-msa/issues"
+Documentation = "https://github.com/Scigantic/scigantic-msa#readme"
 
 [project.scripts]
 scigantic-msa = "scigantic_msa.cli:main"

@@ -20,6 +20,13 @@ def _convert(model, out, *extra):
                  "--model", model, "--out", str(out), "--quiet", *extra])
 
 
+def _af3_doc(out):
+    # af3/ also holds scigantic-msa-attribution.json, and glob order is the
+    # filesystem's, so pick the model input by excluding the sidecar.
+    (path,) = [p for p in out.glob("af3/*.json") if p.name != "scigantic-msa-attribution.json"]
+    return json.loads(path.read_text())
+
+
 def test_from_a3m_reads_a_uniprot_alignment():
     m = MSA().from_a3m(A / "cfdb_uniref30.a3m", uniprot=A / "uniprot_hits.sto")
     assert m.uniprot_rows and len(m.uniprot_rows) > 1 and m.uniprot_rows[0].seq == Q_7M22A
@@ -30,7 +37,7 @@ def test_from_a3m_reads_a_uniprot_alignment():
 
 def test_convert_af3_puts_uniprot_rows_in_paired_msa(tmp_path):
     assert _convert("af3", tmp_path) == 0
-    doc = json.loads(next(tmp_path.glob("af3/*.json")).read_text())
+    doc = _af3_doc(tmp_path)
     prots = [s["protein"] for s in doc["sequences"]]
     assert [p["sequence"] for p in prots] == [Q_7M22A, Q_7M22C]
     for p in prots:
@@ -57,7 +64,7 @@ def test_convert_protenix_pairs_from_uniprot_rows(tmp_path):
 def test_convert_without_uniprot_has_no_paired_msa(tmp_path):
     assert main(["convert", str(A / "cfdb_uniref30.a3m"), str(C / "cfdb_uniref30.a3m"),
                  "--model", "af3", "--out", str(tmp_path), "--quiet"]) == 0
-    doc = json.loads(next(tmp_path.glob("af3/*.json")).read_text())
+    doc = _af3_doc(tmp_path)
     assert all(s["protein"]["pairedMsa"] == "" for s in doc["sequences"])
 
 
