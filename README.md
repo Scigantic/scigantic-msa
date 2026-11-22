@@ -22,6 +22,29 @@ hosts (two public S3 buckets and Hugging Face) even when the ColabFold
 server is your own. On a machine with no internet access, pass
 `--no-open` or set `SCIGANTIC_MSA_NO_REMOTE=1`.
 
+```
+pip install scigantic-msa
+scigantic-msa run MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG \
+    --model boltz --out job/ --open-only
+```
+
+That is human ubiquitin, built from open data alone. It writes
+`job/boltz/query.yaml` and the A3M next to it, prints the `boltz predict`
+command to run next, and reports the depth:
+
+```
+sequence: 16,342 rows from open data (openfold3 16,342), about 5,049 Neff (80%), 2,486 species
+```
+
+## Try it on hosted data
+
+The open alignment sets this tool reads are also in the Scigantic catalog,
+where each opens in a hosted Jupyter notebook with the files mounted, so you
+can look at the alignments themselves without downloading them:
+[OpenFold3 training data](https://scigantic.com/archive/4c0256e9-c213-5aac-957b-bbd5c52439a6?utm_source=github&utm_medium=readme&utm_campaign=scigantic-msa),
+[LiteFold's human proteome ColabFold MSAs](https://scigantic.com/archive/a5224f4f-0fb4-599b-b244-a0d92e1bd3d4?utm_source=github&utm_medium=readme&utm_campaign=scigantic-msa)
+and [OpenProteinSet](https://scigantic.com/archive/0aa301d4-b724-5011-a397-5d4f776893c6?utm_source=github&utm_medium=readme&utm_campaign=scigantic-msa).
+
 ## Install
 
 ```

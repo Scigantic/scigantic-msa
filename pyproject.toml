@@ -34,6 +34,7 @@ dev = ["pytest>=7", "pyarrow>=12", "mypy>=1.10", "ruff>=0.5"]
 
 [project.urls]
 Homepage = "https://github.com/Scigantic/scigantic-msa"
+"Open MSAs in a hosted notebook" = "https://scigantic.com/archive/4c0256e9-c213-5aac-957b-bbd5c52439a6?utm_source=pypi&utm_medium=project-urls&utm_campaign=scigantic-msa"
 Repository = "https://github.com/Scigantic/scigantic-msa"
 Issues = "https://github.com/Scigantic/scigantic-msa/issues"
 Documentation = "https://github.com/Scigantic/scigantic-msa#readme"
