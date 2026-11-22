@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+title: scigantic-msa
+abstract: "Build protein MSAs from the ColabFold MMseqs2 server merged with published open alignments (OpenFold3, LiteFold, OpenProteinSet), and write the input files for AlphaFold 3, Boltz, Chai-1, ColabFold, OpenFold3 or Protenix."
+authors:
+  - name: Scigantic
+    website: https://scigantic.com
+repository-code: https://github.com/Scigantic/scigantic-msa
+url: https://pypi.org/project/scigantic-msa/
+license: MIT
+keywords:
+  - "msa"
+  - "a3m"
+  - "open-data"
+  - "protein"
+  - "alphafold3"
+  - "boltz"
+  - "chai"
+  - "colabfold"
+version: "0.3.0"
+date-released: '2026-11-09'
