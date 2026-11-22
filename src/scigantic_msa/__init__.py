@@ -10,7 +10,7 @@ published open alignments.
     af3_input = AlphaFold3.prepare(result)      # dict ready for json.dump
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from .seqkey import InvalidSequence, canonical_sequence, seq_sha256  # noqa: E402
 from .a3m import A3MError, Row, parse_a3m, parse_stockholm  # noqa: E402

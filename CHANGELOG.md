@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- README opens with what the package reads, adds a runnable example near the top and links the matching dataset pages. Project URLs and classifiers updated. No code changes.
+
 ## 0.3.0
 
 Open data. `run` and `MSA().get()` now merge the ColabFold server's search
